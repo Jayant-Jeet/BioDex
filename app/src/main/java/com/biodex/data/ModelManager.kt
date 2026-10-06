@@ -1,6 +1,9 @@
 package com.biodex.data
 
+import android.app.DownloadManager
 import android.content.Context
+import android.database.Cursor
+import android.net.Uri
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.File
@@ -8,6 +11,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.delay
 
 object ModelManager {
     const val MODEL_FILE_NAME = "bioclip_2_5_vith14_image_fp16.onnx"
@@ -45,9 +49,109 @@ object ModelManager {
     }
 
     @Throws(IOException::class)
-    fun downloadModel(
+    suspend fun downloadModel(
         context: Context,
         modelUrl: String = DEFAULT_MODEL_URL,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
+    ) {
+        val appContext = context.applicationContext
+        val downloadManager = appContext.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+
+        if (downloadManager != null) {
+            try {
+                downloadWithDownloadManager(appContext, downloadManager, modelUrl, onProgress)
+                return
+            } catch (_: Exception) {
+                // Fallback to HttpURLConnection if DownloadManager fails
+            }
+        }
+
+        downloadWithHttpURLConnection(appContext, modelUrl, onProgress)
+    }
+
+    private suspend fun downloadWithDownloadManager(
+        context: Context,
+        downloadManager: DownloadManager,
+        modelUrl: String,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
+    ) {
+        val finalModelFile = getModelFile(context)
+        val tempFileName = "$MODEL_FILE_NAME.tmp"
+
+        val destDir = context.getExternalFilesDir(null) ?: context.filesDir
+        val downloadedTempFile = File(destDir, tempFileName)
+        if (downloadedTempFile.exists()) {
+            downloadedTempFile.delete()
+        }
+
+        val request = DownloadManager.Request(Uri.parse(modelUrl))
+            .setTitle("BioCLIP Field Guide Model")
+            .setDescription("Downloading AI model for offline identification")
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true)
+            .setDestinationInExternalFilesDir(context, null, tempFileName)
+
+        val downloadId = downloadManager.enqueue(request)
+
+        while (true) {
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor: Cursor? = downloadManager.query(query)
+            if (cursor != null && cursor.moveToFirst()) {
+                val bytesDownloadedIndex = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                val totalSizeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
+
+                val downloadedBytes = if (bytesDownloadedIndex >= 0) cursor.getLong(bytesDownloadedIndex) else 0L
+                val totalBytes = if (totalSizeIndex >= 0) {
+                    val size = cursor.getLong(totalSizeIndex)
+                    if (size > 0) size else EXPECTED_MODEL_SIZE_BYTES
+                } else EXPECTED_MODEL_SIZE_BYTES
+
+                if (downloadedBytes > 0) {
+                    onProgress(downloadedBytes, totalBytes)
+                }
+
+                if (statusIndex >= 0) {
+                    when (cursor.getInt(statusIndex)) {
+                        DownloadManager.STATUS_SUCCESSFUL -> {
+                            cursor.close()
+                            break
+                        }
+                        DownloadManager.STATUS_FAILED -> {
+                            val reason = if (reasonIndex >= 0) cursor.getInt(reasonIndex) else -1
+                            cursor.close()
+                            throw IOException("System DownloadManager failed with error code $reason.")
+                        }
+                    }
+                }
+                cursor.close()
+            }
+            delay(300)
+        }
+
+        if (downloadedTempFile.exists()) {
+            if (finalModelFile.exists()) {
+                finalModelFile.delete()
+            }
+            BufferedInputStream(downloadedTempFile.inputStream()).use { input ->
+                BufferedOutputStream(FileOutputStream(finalModelFile)).use { output ->
+                    input.copyTo(output)
+                }
+            }
+            downloadedTempFile.delete()
+        }
+
+        if (finalModelFile.length() != EXPECTED_MODEL_SIZE_BYTES) {
+            finalModelFile.delete()
+            throw IOException("Downloaded model file size (${finalModelFile.length()} bytes) does not match expected size ($EXPECTED_MODEL_SIZE_BYTES bytes).")
+        }
+    }
+
+    private fun downloadWithHttpURLConnection(
+        context: Context,
+        modelUrl: String,
         onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
     ) {
         val modelFile = getModelFile(context)

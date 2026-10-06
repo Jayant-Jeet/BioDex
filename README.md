@@ -69,3 +69,11 @@ The text is AI-written and may contain inaccuracies (Gemma terms of use apply). 
 ## UX, XP and missions
 
 The UI follows the BioDex Figma Make design (splash, dashboard, camera, specimen card). Discoveries earn XP by rarity (duplicates 25 XP), 1,000 XP per level, a daily streak, a daily field mission with bonus XP and badges, and a field rank. Progress is stored locally (ProgressStore). Fonts DM Sans and DM Serif Display are bundled under the SIL OFL.
+
+## Working demo
+
+
+
+https://github.com/user-attachments/assets/6ff7aeaa-dc16-4a90-8802-b1583f130737
+
+

@@ -131,7 +131,7 @@ fun Dashboard(
                         LevelCard(progress)
                         ProgressCard(distinct)
                         MissionCard(progress, today, onScan)
-                        SearchRow(query, { query = it }, onScan)
+                        SearchRow(query) { query = it }
                         SectionHead(cards.size, totalXp, ascending, sortKey, { sortKey = sortKey.next() }) { ascending = !ascending }
                         Box(Modifier.height(17.dp))
                     }
@@ -153,16 +153,16 @@ fun Dashboard(
                 item {
                     if (visible.isEmpty()) {
                         BText(
-                            if (cards.isEmpty()) "Nothing here yet — tap Capture plant to start your BioDex." else "No captured plants match your search.",
+                            if (cards.isEmpty()) "Nothing here yet — tap the camera button to start your BioDex." else "No captured plants match your search.",
                             13f, BColor.Muted2,
                             Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 24.dp),
                             align = TextAlign.Center, lineHeight = 19f,
                         )
                     }
-                    Box(Modifier.height(110.dp))
+                    Box(Modifier.height(80.dp))
                 }
             }
-            BottomNav(Modifier.align(Alignment.BottomCenter), onScan)
+            CaptureFloatingActionButton(Modifier.align(Alignment.BottomCenter), onScan)
         }
     }
 }
@@ -362,15 +362,14 @@ private fun MissionCard(progress: Progress, today: Long, onGo: () -> Unit) {
 }
 
 @Composable
-private fun SearchRow(query: String, onQuery: (String) -> Unit, onScan: () -> Unit) {
+private fun SearchRow(query: String, onQuery: (String) -> Unit) {
     Row(
         Modifier.padding(top = 17.dp, bottom = 27.dp).fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             Modifier
-                .weight(1f)
+                .fillMaxWidth()
                 .height(51.dp)
                 .background(Color.White, RoundedCornerShape(16.dp))
                 .border(1.dp, Color(0xFFE2E8DD), RoundedCornerShape(16.dp))
@@ -391,14 +390,6 @@ private fun SearchRow(query: String, onQuery: (String) -> Unit, onScan: () -> Un
                 )
             }
         }
-        Box(
-            Modifier
-                .size(51.dp)
-                .shadow(10.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x66E58C37), spotColor = Color(0x66E58C37))
-                .background(BColor.Orange, RoundedCornerShape(16.dp))
-                .pressable(onScan),
-            contentAlignment = Alignment.Center,
-        ) { BIcon("camera", 21f, Color.White) }
     }
 }
 
@@ -501,39 +492,19 @@ fun RarityBadge(rarity: Rarity) {
 }
 
 @Composable
-private fun BottomNav(modifier: Modifier, onScan: () -> Unit) {
-    val pulse = rememberInfiniteTransition(label = "pulse")
-    val ring by pulse.animateFloat(0f, 1f, infiniteRepeatable(tween(2400), RepeatMode.Restart), label = "ring")
-    Column(modifier.fillMaxWidth().background(Color(0xF0FFFFFC))) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE6EBE3)))
-        Row(
-            Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)).fillMaxWidth().height(96.dp),
-        ) {
-            Column(Modifier.weight(1f).fillMaxHeight(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                BIcon("collection", 23f, BColor.Forest)
-                BText("Captured cards", 9f, BColor.Forest, Modifier.padding(top = 4.dp), weight = 600)
-            }
-            Row(
-                Modifier.weight(1f).fillMaxHeight().pressable(onScan),
-                horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(50.dp), contentAlignment = Alignment.Center) {
-                    Canvas(Modifier.size(50.dp)) {
-                        val grow = 9.dp.toPx() * ring
-                        drawCircle(Color(0xFFE58C37).copy(alpha = 0.25f * (1 - ring)), 25.dp.toPx() + grow)
-                    }
-                    Box(
-                        Modifier
-                            .size(50.dp)
-                            .shadow(10.dp, CircleShape, ambientColor = Color(0x4DC6691F), spotColor = Color(0x4DC6691F))
-                            .background(BColor.Orange, CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) { BIcon("camera", 23f, Color(0xFFFFF8EC)) }
-                }
-                BText("Capture plant", 11f, BColor.Forest, weight = 700)
-            }
-        }
+private fun CaptureFloatingActionButton(modifier: Modifier = Modifier, onScan: () -> Unit) {
+    Box(
+        modifier
+            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+            .padding(bottom = 20.dp)
+            .size(72.dp)
+            .shadow(14.dp, CircleShape, ambientColor = Color(0x661A402B), spotColor = Color(0x661A402B))
+            .background(BColor.Forest, CircleShape)
+            .border(3.dp, Color.White, CircleShape)
+            .pressable(onScan),
+        contentAlignment = Alignment.Center,
+    ) {
+        BIcon("camera", 34f, Color.White, strokeWidth = 2.2f)
     }
 }
 

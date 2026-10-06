@@ -118,27 +118,32 @@ class BioClipClassifier(context: Context) : Closeable {
         if (!modelDirectory.exists()) modelDirectory.mkdirs()
         val modelFile = File(modelDirectory, MODEL_FILE_NAME)
 
-        if (modelFile.exists() && modelFile.isFile && modelFile.length() > 0) {
-            return modelFile
+        if (modelFile.exists() && modelFile.isFile) {
+            if (modelFile.length() == ModelManager.EXPECTED_MODEL_SIZE_BYTES) {
+                return modelFile
+            } else {
+                modelFile.delete()
+            }
         }
 
         try {
             appContext.assets.openFd("bioclip/$MODEL_FILE_NAME").use { asset ->
                 val expectedSize = asset.length
-                if (expectedSize > 0L) {
-                    if (modelFile.isFile && modelFile.length() == expectedSize) return modelFile
+                if (expectedSize == ModelManager.EXPECTED_MODEL_SIZE_BYTES) {
                     asset.createInputStream().use { input ->
                         BufferedOutputStream(FileOutputStream(modelFile)).use { output ->
                             input.copyTo(output)
                         }
                     }
-                    if (modelFile.length() == expectedSize) return modelFile
+                    if (modelFile.length() == ModelManager.EXPECTED_MODEL_SIZE_BYTES) {
+                        return modelFile
+                    }
                 }
             }
         } catch (_: Exception) {}
 
         throw IllegalStateException(
-            "BioCLIP model file is not available locally. Please download the field guide model first."
+            "BioCLIP model file is missing or invalid. Please download the field guide model on the splash screen."
         )
     }
 

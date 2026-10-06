@@ -11,9 +11,9 @@ import java.net.URL
 
 object ModelManager {
     const val MODEL_FILE_NAME = "bioclip_2_5_vith14_image_fp16.onnx"
-    // Default model download URL (hosted on GitHub Releases or CDN)
-    const val DEFAULT_MODEL_URL = "https://github.com/Jayant-Jeet/BioDex/blob/main/releases/download/$MODEL_FILE_NAME"
-    const val EXPECTED_MODEL_SIZE_BYTES = 1_264_488_704L // ~1.2 GB
+    // Raw download URL (must point directly to binary file, not GitHub HTML preview page)
+    const val DEFAULT_MODEL_URL = "https://github.com/Jayant-Jeet/BioDex/raw/main/releases/download/$MODEL_FILE_NAME"
+    const val EXPECTED_MODEL_SIZE_BYTES = 1_264_483_431L // Exact ONNX model size in bytes
 
     fun getModelFile(context: Context): File {
         val modelDir = File(context.applicationContext.filesDir, "bioclip")
@@ -24,12 +24,24 @@ object ModelManager {
     }
 
     fun isModelDownloaded(context: Context): Boolean {
+        // First check if full model is bundled in APK assets (e.g. local debug build)
         try {
-            context.assets.openFd("bioclip/$MODEL_FILE_NAME").use { return true }
+            context.assets.openFd("bioclip/$MODEL_FILE_NAME").use { asset ->
+                if (asset.length == EXPECTED_MODEL_SIZE_BYTES) return true
+            }
         } catch (_: Exception) {}
 
+        // Check if full model exists in local downloaded storage
         val modelFile = getModelFile(context)
-        return modelFile.exists() && modelFile.isFile && modelFile.length() > 0
+        if (modelFile.exists() && modelFile.isFile) {
+            if (modelFile.length() == EXPECTED_MODEL_SIZE_BYTES) {
+                return true
+            } else {
+                // Delete invalid or truncated file
+                modelFile.delete()
+            }
+        }
+        return false
     }
 
     @Throws(IOException::class)
@@ -41,27 +53,46 @@ object ModelManager {
         val modelFile = getModelFile(context)
         val tempFile = File(modelFile.parentFile, "$MODEL_FILE_NAME.tmp")
 
+        var currentUrl = modelUrl
         var connection: HttpURLConnection? = null
-        try {
-            val url = URL(modelUrl)
-            connection = url.openConnection() as HttpURLConnection
-            connection.connectTimeout = 15_000
-            connection.readTimeout = 30_000
-            connection.instanceFollowRedirects = true
-            connection.connect()
+        var redirectCount = 0
 
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw IOException("Server returned HTTP response code $responseCode: ${connection.responseMessage}")
+        try {
+            while (redirectCount < 10) {
+                val url = URL(currentUrl)
+                connection = url.openConnection() as HttpURLConnection
+                connection.connectTimeout = 20_000
+                connection.readTimeout = 30_000
+                connection.instanceFollowRedirects = true
+
+                val status = connection.responseCode
+                if (status == HttpURLConnection.HTTP_MOVED_TEMP ||
+                    status == HttpURLConnection.HTTP_MOVED_PERM ||
+                    status == HttpURLConnection.HTTP_SEE_OTHER ||
+                    status == 307 || status == 308
+                ) {
+                    val location = connection.getHeaderField("Location")
+                        ?: throw IOException("HTTP redirect missing Location header.")
+                    currentUrl = location
+                    connection.disconnect()
+                    redirectCount++
+                    continue
+                }
+
+                if (status !in 200..299) {
+                    throw IOException("Server returned HTTP response code $status: ${connection.responseMessage}")
+                }
+                break
             }
 
-            val contentLength = connection.contentLengthLong.let {
+            val conn = connection ?: throw IOException("Could not establish connection to model URL.")
+            val contentLength = conn.contentLengthLong.let {
                 if (it > 0) it else EXPECTED_MODEL_SIZE_BYTES
             }
 
-            BufferedInputStream(connection.inputStream, 8192).use { input ->
-                BufferedOutputStream(FileOutputStream(tempFile), 8192).use { output ->
-                    val buffer = ByteArray(32 * 1024)
+            BufferedInputStream(conn.inputStream, 64 * 1024).use { input ->
+                BufferedOutputStream(FileOutputStream(tempFile), 64 * 1024).use { output ->
+                    val buffer = ByteArray(64 * 1024)
                     var downloadedBytes = 0L
                     var bytesRead: Int
                     var lastReportedTime = System.currentTimeMillis()
@@ -80,8 +111,8 @@ object ModelManager {
                 }
             }
 
-            if (tempFile.length() <= 0) {
-                throw IOException("Downloaded model file is empty.")
+            if (tempFile.length() != EXPECTED_MODEL_SIZE_BYTES && tempFile.length() != contentLength) {
+                throw IOException("Downloaded file size (${tempFile.length()} bytes) does not match expected size ($EXPECTED_MODEL_SIZE_BYTES bytes).")
             }
 
             if (modelFile.exists()) {

@@ -6,7 +6,7 @@
 
 android {
     namespace = "com.biodex"
-    compileSdk = 35
+    compileSdk = 36
 
     splits {
         abi {
@@ -20,10 +20,19 @@ android {
     defaultConfig {
         applicationId = "com.halfbloodcoder.biodex"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "1.0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
+        }
     }
 
     compileOptions {

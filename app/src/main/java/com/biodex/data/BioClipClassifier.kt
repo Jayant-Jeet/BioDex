@@ -96,7 +96,7 @@ class BioClipClassifier(context: Context) : Closeable {
     @Synchronized
     private fun getSession(): OrtSession {
         session?.let { return it }
-        val modelFile = copyModelToFiles()
+        val modelFile = getModelFile()
         val options = OrtSession.SessionOptions()
         try {
             options.setIntraOpNumThreads(NUM_INTRA_OP_THREADS)
@@ -113,42 +113,33 @@ class BioClipClassifier(context: Context) : Closeable {
         return readNumpyTable().also { embeddings = it }
     }
 
-    private fun copyModelToFiles(): File {
+    private fun getModelFile(): File {
         val modelDirectory = File(appContext.filesDir, "bioclip")
-        check(modelDirectory.exists() || modelDirectory.mkdirs()) {
-            "Could not prepare private storage for the BioCLIP model."
-        }
+        if (!modelDirectory.exists()) modelDirectory.mkdirs()
         val modelFile = File(modelDirectory, MODEL_FILE_NAME)
-        appContext.assets.openFd("bioclip/$MODEL_FILE_NAME").use { asset ->
-            val expectedSize = asset.length
-            if (expectedSize <= 0L) {
-                throw IOException("BioCLIP model asset has an invalid size.")
-            }
-            if (modelFile.isFile && modelFile.length() == expectedSize) return modelFile
 
-            val temporaryFile = File.createTempFile("bioclip-", ".onnx", modelDirectory)
-            try {
-                asset.createInputStream().use { input ->
-                    BufferedOutputStream(FileOutputStream(temporaryFile)).use { output ->
-                        input.copyTo(output)
+        if (modelFile.exists() && modelFile.isFile && modelFile.length() > 0) {
+            return modelFile
+        }
+
+        try {
+            appContext.assets.openFd("bioclip/$MODEL_FILE_NAME").use { asset ->
+                val expectedSize = asset.length
+                if (expectedSize > 0L) {
+                    if (modelFile.isFile && modelFile.length() == expectedSize) return modelFile
+                    asset.createInputStream().use { input ->
+                        BufferedOutputStream(FileOutputStream(modelFile)).use { output ->
+                            input.copyTo(output)
+                        }
                     }
-                }
-                if (temporaryFile.length() != expectedSize) {
-                    throw IOException("Bundled BioCLIP model has an unexpected file size.")
-                }
-                if (modelFile.exists() && !modelFile.delete()) {
-                    throw IOException("Could not replace the cached BioCLIP model.")
-                }
-                if (!temporaryFile.renameTo(modelFile)) {
-                    throw IOException("Could not install the BioCLIP model in private storage.")
-                }
-                return modelFile
-            } finally {
-                if (temporaryFile.exists() && !temporaryFile.delete()) {
-                    temporaryFile.deleteOnExit()
+                    if (modelFile.length() == expectedSize) return modelFile
                 }
             }
-        }
+        } catch (_: Exception) {}
+
+        throw IllegalStateException(
+            "BioCLIP model file is not available locally. Please download the field guide model first."
+        )
     }
 
     private fun readNumpyTable(): FloatArray {

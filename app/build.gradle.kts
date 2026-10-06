@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.biodex"
+        applicationId = "com.halfbloodcoder.biodex"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -31,6 +31,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+
+
     buildFeatures {
         compose = true
     }
@@ -38,6 +40,7 @@ android {
     androidResources {
         noCompress += listOf("onnx", "npy")
     }
+    buildToolsVersion = "35.0.0"
 }
 
 dependencies {
@@ -65,4 +68,11 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")
 }
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
 

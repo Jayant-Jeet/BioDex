@@ -1,0 +1,14 @@
+[
+  {"id":"monarch","name":"Monarch Butterfly","scientificName":"Danaus plexippus","rarity":"Uncommon"},
+  {"id":"blue-jay","name":"Blue Jay","scientificName":"Cyanocitta cristata","rarity":"Common"},
+  {"id":"fern","name":"Bracken Fern","scientificName":"Pteridium aquilinum","rarity":"Common"},
+  {"id":"tulip","name":"Wild Tulip","scientificName":"Tulipa sylvestris","rarity":"Uncommon"},
+  {"id":"fawn","name":"White-tailed Deer","scientificName":"Odocoileus virginianus","rarity":"Rare"},
+  {"id":"mushroom","name":"Fly Agaric","scientificName":"Amanita muscaria","rarity":"Rare"},
+  {"id":"cardinal","name":"Northern Cardinal","scientificName":"Cardinalis cardinalis","rarity":"Uncommon"},
+  {"id":"daisy","name":"Oxeye Daisy","scientificName":"Leucanthemum vulgare","rarity":"Common"},
+  {"id":"fox","name":"Red Fox","scientificName":"Vulpes vulpes","rarity":"Uncommon"},
+  {"id":"oak","name":"White Oak","scientificName":"Quercus alba","rarity":"Common"},
+  {"id":"ladybug","name":"Seven-spot Ladybird","scientificName":"Coccinella septempunctata","rarity":"Common"},
+  {"id":"lavender","name":"Wild Lavender","scientificName":"Lavandula angustifolia","rarity":"Rare"}
+]

@@ -1,0 +1,10 @@
+.gradle/
+**/build/
+local.properties
+.idea/
+.venv/
+app/src/main/assets/bioclip/bioclip_2_5_vith14_image_fp16.onnx
+app/src/main/assets/bioclip/model-info.json
+*.iml
+*.apk
+*.aab

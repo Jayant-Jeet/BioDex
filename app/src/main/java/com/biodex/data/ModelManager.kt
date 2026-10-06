@@ -12,7 +12,7 @@ import java.net.URL
 object ModelManager {
     const val MODEL_FILE_NAME = "bioclip_2_5_vith14_image_fp16.onnx"
     // Default model download URL (hosted on GitHub Releases or CDN)
-    const val DEFAULT_MODEL_URL = "https://github.com/Jayant-Jeet/BioDex/releases/download/$MODEL_FILE_NAME"
+    const val DEFAULT_MODEL_URL = "https://github.com/Jayant-Jeet/BioDex/blob/main/releases/download/$MODEL_FILE_NAME"
     const val EXPECTED_MODEL_SIZE_BYTES = 1_264_488_704L // ~1.2 GB
 
     fun getModelFile(context: Context): File {

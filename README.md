@@ -74,6 +74,5 @@ The UI follows the BioDex Figma Make design (splash, dashboard, camera, specimen
 
 
 
-https://github.com/user-attachments/assets/6ff7aeaa-dc16-4a90-8802-b1583f130737
-
+https://github.com/user-attachments/assets/10ae62b8-d45c-44c8-8d80-05f2fb6cfb4d
 

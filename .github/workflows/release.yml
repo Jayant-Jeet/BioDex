@@ -71,7 +71,7 @@ jobs:
       - name: Rename artifacts
         run: |
           cp app/build/outputs/bundle/release/app-release.aab "BioDex-v${{ steps.bump.outputs.name }}.aab"
-          cp app/build/outputs/apk/release/app-release.apk "BioDex-v${{ steps.bump.outputs.name }}.apk"
+          cp app/build/outputs/apk/release/app-universal-release.apk "BioDex-v${{ steps.bump.outputs.name }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:

@@ -63,7 +63,8 @@ jobs:
           git add app/build.gradle.kts
           git commit -m "chore: release v${{ steps.bump.outputs.name }} (${{ steps.bump.outputs.code }})"
           git checkout -- .
-          git pull --rebase origin "${{ github.ref_name }}"
+          git fetch origin
+          git rebase origin "${{ github.ref_name }}"
           git tag "v${{ steps.bump.outputs.name }}"
           git push origin HEAD "v${{ steps.bump.outputs.name }}"
 

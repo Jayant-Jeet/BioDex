@@ -63,7 +63,7 @@ jobs:
           git add app/build.gradle.kts
           git commit -m "chore: release v${{ steps.bump.outputs.name }} (${{ steps.bump.outputs.code }})"
           git tag "v${{ steps.bump.outputs.name }}"
-          git push origin HEAD --follow-tags
+          git push origin HEAD "v${{ steps.bump.outputs.name }}"
 
       - name: Rename AAB
         run: cp app/build/outputs/bundle/release/app-release.aab "BioDex-v${{ steps.bump.outputs.name }}.aab"

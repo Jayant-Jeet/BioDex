@@ -1,0 +1,81 @@
+name: Release AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump type
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Bump version
+        id: bump
+        run: |
+          f=app/build.gradle.kts
+          code=$(grep -oP 'versionCode = \K\d+' $f)
+          name=$(grep -oP 'versionName = "\K[^"]+' $f)
+          IFS=. read -r maj min pat <<< "$name"
+          case "${{ inputs.bump }}" in
+            major) maj=$((maj+1)); min=0; pat=0 ;;
+            minor) min=$((min+1)); pat=0 ;;
+            *) pat=$((pat+1)) ;;
+          esac
+          new_name="$maj.$min.$pat"; new_code=$((code+1))
+          sed -i "s/versionCode = $code/versionCode = $new_code/; s/versionName = \"$name\"/versionName = \"$new_name\"/" $f
+          echo "name=$new_name" >> $GITHUB_OUTPUT
+          echo "code=$new_code" >> $GITHUB_OUTPUT
+
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
+
+      - name: Build signed AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:bundleRelease
+
+      - name: Commit version bump and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle.kts
+          git commit -m "chore: release v${{ steps.bump.outputs.name }} (${{ steps.bump.outputs.code }})"
+          git tag "v${{ steps.bump.outputs.name }}"
+          git push origin HEAD --follow-tags
+
+      - name: Rename AAB
+        run: cp app/build/outputs/bundle/release/app-release.aab "BioDex-v${{ steps.bump.outputs.name }}.aab"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BioDex-aab
+          path: BioDex-v${{ steps.bump.outputs.name }}.aab
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.bump.outputs.name }}" "BioDex-v${{ steps.bump.outputs.name }}.aab" \
+            --title "v${{ steps.bump.outputs.name }}" --generate-notes

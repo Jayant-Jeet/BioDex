@@ -1,4 +1,4 @@
-name: Release AAB
+name: Release AAB and APK
 
 on:
   workflow_dispatch:
@@ -47,14 +47,14 @@ jobs:
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> $GITHUB_ENV
 
-      - name: Build signed AAB
+      - name: Build signed AAB and APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          ./gradlew :app:bundleRelease
+          ./gradlew :app:bundleRelease :app:assembleRelease
 
       - name: Commit version bump and tag
         run: |
@@ -68,17 +68,21 @@ jobs:
           git tag "v${{ steps.bump.outputs.name }}"
           git push origin HEAD "v${{ steps.bump.outputs.name }}"
 
-      - name: Rename AAB
-        run: cp app/build/outputs/bundle/release/app-release.aab "BioDex-v${{ steps.bump.outputs.name }}.aab"
+      - name: Rename artifacts
+        run: |
+          cp app/build/outputs/bundle/release/app-release.aab "BioDex-v${{ steps.bump.outputs.name }}.aab"
+          cp app/build/outputs/apk/release/app-release.apk "BioDex-v${{ steps.bump.outputs.name }}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: BioDex-aab
-          path: BioDex-v${{ steps.bump.outputs.name }}.aab
+          name: BioDex-release
+          path: |
+            BioDex-v${{ steps.bump.outputs.name }}.aab
+            BioDex-v${{ steps.bump.outputs.name }}.apk
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ steps.bump.outputs.name }}" "BioDex-v${{ steps.bump.outputs.name }}.aab" \
+          gh release create "v${{ steps.bump.outputs.name }}" "BioDex-v${{ steps.bump.outputs.name }}.aab" "BioDex-v${{ steps.bump.outputs.name }}.apk" \
             --title "v${{ steps.bump.outputs.name }}" --generate-notes

@@ -8,3 +8,4 @@ app/src/main/assets/bioclip/model-info.json
 *.iml
 *.apk
 *.aab
+app/release/

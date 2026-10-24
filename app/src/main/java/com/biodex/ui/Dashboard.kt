@@ -323,7 +323,7 @@ private fun ExplorerCard(progress: Progress) {
             }
         }
         Box(
-            Modifier.align(Alignment.BottomEnd).padding(end = (-30).dp, bottom = (-60).dp).size(180.dp)
+            Modifier.align(Alignment.BottomEnd).offset(x = 30.dp, y = 60.dp).size(180.dp)
                 .border(1.dp, Color(0x2EECC468), CircleShape),
         )
     }

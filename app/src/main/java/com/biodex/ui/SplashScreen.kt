@@ -177,10 +177,11 @@ fun SplashScreen(
         }
     }
 
-    LaunchedEffect(downloadState.stage, hasModel) {
+    LaunchedEffect(downloadState.stage) {
         if (downloadState.stage == ModelDownloadStage.DONE && !hasModel && !previewMode) {
-            hasModel = ModelManager.hasVerifiedModel(context)
-            if (hasModel) {
+            val verified = ModelManager.hasVerifiedModel(context)
+            hasModel = verified
+            if (verified) {
                 delay(500)
                 onDone()
             } else {

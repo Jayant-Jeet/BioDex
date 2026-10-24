@@ -1,11 +1,11 @@
 # Figma Make comparison checklist
 
-Source of truth: `design/UI.make`, extracted under `design/figma-make/`. The export contains splash, collection/dashboard, camera, and specimen-detail frames. The supplied export does not contain separate result or settings frames.
+Source of truth: `design/UI.make` and its embedded Figma Make source archive; the extracted copy under `design/figma-make/` may be stale. The export contains splash, collection/dashboard, camera, and specimen-detail frames. The supplied export does not contain separate result or settings frames.
 
 | Figma frame/state | App mapping | Result / deviation |
 |---|---|---|
 | Splash / brand | `SplashScreen` | Existing BioDex splash branding is retained. Queue, download progress, network wait, verifying, retry/error, mobile-data consent, battery guidance, and done states extend this screen because the export does not define model-download states. |
-| Collection dashboard | `Dashboard` | Figma-style rank/progress, collection summary, search, two-column lazy card list, and capture action are implemented. The mission panel is omitted from this screen per user confirmation; mission and XP logic remain in the app. |
+| Collection dashboard | `Dashboard` | Figma-style rank/progress, collection summary, search, two-column lazy card list, and capture action are implemented. The latest Figma revision removes the Explorer card's lower-right concentric-ring decoration; the Compose card now matches while retaining the background gradients. The mission panel is omitted from this screen per user confirmation; mission and XP logic remain in the app. |
 | Collection sort menu | `Dashboard` + `CardSort` | Newest, oldest, name A–Z, and name Z–A are wired with newest-first default, stable ties, background sorting, and persisted selection. |
 | Camera / capture | `CaptureScreen` | Existing CameraX preview and capture flow are retained and previewed. Device-camera behavior still needs hardware validation. |
 | Specimen card / detail | `SpecimenScreen` | Common, uncommon, and rare treatments; scientific/common names; quality; capture date/location; fallback text; and long-name wrapping are implemented. Card photo is the locally captured specimen image rather than the export's remote Unsplash placeholder, preserving offline use and the user's actual capture. |
@@ -16,6 +16,7 @@ Source of truth: `design/UI.make`, extracted under `design/figma-make/`. The exp
 ## Visual verification status
 
 - Compose previews are present for the dashboard, splash progress/error, camera, classification, and specimen common/uncommon/rare variants.
+- The latest Figma revision changes only the Explorer card decoration; the other mapped frames remain unchanged.
 - The app reuses its bundled DM Sans/DM Serif resources and the Figma-derived vector path icons; no font or icon substitution was introduced.
 - The theme file centralizes the font families, core colors, spacing scale, component dimensions, strokes, elevation, and motion values. **Deviation:** one-off color/spacing values and some gradient stops remain inline in screen drawing code, so token extraction is not yet exhaustive.
 - The specimen image height adapts to available height and the dashboard is capped at 560 dp to reduce overflow on small/large phones. No physical-device runs at the requested 5.0–6.9 inch sizes have been performed.

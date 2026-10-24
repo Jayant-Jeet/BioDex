@@ -1,6 +1,7 @@
 ﻿package com.biodex.ui
 
 import android.content.Context
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -11,6 +12,11 @@ import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.graphics.Rect as AndroidRect
+import android.os.Handler
+import android.os.Looper
+import android.view.PixelCopy
+import android.view.Window
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -24,6 +30,15 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.Random
+import java.util.UUID
+import androidx.compose.ui.unit.IntRect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.IOException
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.math.roundToInt
 
 object CardArtwork {
     private const val W = 720
@@ -44,6 +59,40 @@ object CardArtwork {
         return destination
     }
 
+    suspend fun exportVisibleCard(activity: Activity, bounds: IntRect): File {
+        require(bounds.width > 0 && bounds.height > 0) { "The specimen card is not ready to export." }
+        val bitmap = captureCard(activity.window, bounds, activity.resources.displayMetrics.density)
+        return withContext(Dispatchers.IO) {
+            val directory = File(activity.cacheDir, "shared_cards")
+            check(directory.exists() || directory.mkdirs()) { "Could not prepare the card export folder." }
+            val destination = File(directory, "${UUID.randomUUID()}.png")
+            try {
+                FileOutputStream(destination).use { output ->
+                    check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) {
+                        "Could not encode the specimen card."
+                    }
+                }
+                destination
+            } catch (exception: Exception) {
+                destination.delete()
+                throw exception
+            } finally {
+                bitmap.recycle()
+            }
+        }
+    }
+
+    fun cleanExpiredExports(context: Context, maxAgeMillis: Long = 24L * 60 * 60 * 1000) {
+        val directory = File(context.cacheDir, "shared_cards")
+        if (!directory.exists()) return
+        val cutoff = System.currentTimeMillis() - maxAgeMillis
+        directory.listFiles()?.forEach { file ->
+            if (file.isFile && file.lastModified() < cutoff && !file.delete()) {
+                android.util.Log.w("BioDexCardExport", "Could not delete expired export ${file.name}.")
+            }
+        }
+    }
+
     fun draw(card: CollectionCard, species: Species): Bitmap {
         val image = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(image)
@@ -56,6 +105,52 @@ object CardArtwork {
         drawRarity(canvas, paint, species.rarity, card.quality)
         drawFooter(canvas, paint, card)
         return image
+    }
+
+    private suspend fun captureCard(window: Window, bounds: IntRect, density: Float): Bitmap {
+        return withContext(Dispatchers.Main.immediate) {
+            val view = window.decorView
+            check(view.width > 0 && view.height > 0) { "The app window is not ready to export." }
+            val inset = (12f * density).roundToInt()
+            val sourceRect = AndroidRect(
+                bounds.left - inset,
+                bounds.top - inset,
+                bounds.right + inset,
+                bounds.bottom + inset,
+            )
+            check(
+                sourceRect.width() > 0 && sourceRect.height() > 0 &&
+                    sourceRect.left >= 0 && sourceRect.top >= 0 &&
+                    sourceRect.right <= view.width && sourceRect.bottom <= view.height,
+            ) {
+                "The full specimen card and shadow are not visible; adjust the screen and try sharing again."
+            }
+            val bitmap = Bitmap.createBitmap(sourceRect.width(), sourceRect.height(), Bitmap.Config.ARGB_8888)
+            suspendCancellableCoroutine { continuation ->
+                continuation.invokeOnCancellation {
+                    if (!bitmap.isRecycled) bitmap.recycle()
+                }
+                PixelCopy.request(
+                    window,
+                    sourceRect,
+                    bitmap,
+                    { result ->
+                        if (result == PixelCopy.SUCCESS) {
+                            if (continuation.isActive) continuation.resume(bitmap)
+                            else if (!bitmap.isRecycled) bitmap.recycle()
+                        } else {
+                            if (!bitmap.isRecycled) bitmap.recycle()
+                            if (continuation.isActive) {
+                                continuation.resumeWithException(
+                                    IOException("Could not capture the specimen card (PixelCopy error $result)."),
+                                )
+                            }
+                        }
+                    },
+                    Handler(Looper.getMainLooper()),
+                )
+            }
+        }
     }
 
     private fun drawBackground(canvas: Canvas, paint: Paint, seed: String) {
@@ -221,4 +316,3 @@ object CardArtwork {
 private fun fallbackDetail(species: Species) =
     "${species.name} (${species.scientificName}) is a plant spotted in the wild. " +
         "Look closely at its leaves, flowers and habitat."
-

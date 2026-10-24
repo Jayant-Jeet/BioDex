@@ -1,3 +1,4 @@
 <paths>
     <files-path name="cards" path="cards/" />
+    <cache-path name="shared_cards" path="shared_cards/" />
 </paths>

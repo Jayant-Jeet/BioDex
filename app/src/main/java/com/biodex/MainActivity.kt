@@ -2,6 +2,7 @@
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -27,13 +28,16 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowInsetsControllerCompat
 import com.biodex.data.BioClipClassifier
 import com.biodex.data.CardStore
 import com.biodex.data.CollectionCard
@@ -52,7 +56,6 @@ import com.biodex.ui.Dashboard
 import com.biodex.ui.SpecimenButton
 import com.biodex.ui.SpecimenScreen
 import com.biodex.ui.SplashScreen
-import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        CardArtwork.cleanExpiredExports(this)
         val starterSpecies = SpeciesCatalog.load(this)
         val modelSpecies = SpeciesCatalog.loadBioClip(this)
         val collectionSpecies = (starterSpecies + modelSpecies).distinctBy { it.id }
@@ -115,6 +119,56 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
     var viewing by remember { mutableStateOf<Pair<CollectionCard, Int>?>(null) }
     var askedForLocation by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
+    var isExportingCard by remember { mutableStateOf(false) }
+    var specimenCardBounds by remember { mutableStateOf(IntRect.Zero) }
+    val toast = { text: String -> Toast.makeText(context, text, Toast.LENGTH_LONG).show() }
+
+    val shareCard: (Species) -> Unit = { item ->
+        if (!isExportingCard) {
+            isExportingCard = true
+            scope.launch {
+                try {
+                    val activity = context.findActivity()
+                        ?: throw IllegalStateException("The app window is unavailable for card export.")
+                    val cardFile = CardArtwork.exportVisibleCard(activity, specimenCardBounds)
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", cardFile)
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "image/png"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_TEXT, "My BioDex field find: ${item.name}")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(intent, "Share your field card"))
+                } catch (exception: Exception) {
+                    toast("Could not export or share card: ${exception.localizedMessage ?: "unknown error"}")
+                } finally {
+                    isExportingCard = false
+                }
+            }
+        }
+    }
+
+    SideEffect {
+        val window = context.findActivity()?.window
+        if (window != null) {
+            val darkSurface = destination != Destination.HOME
+            window.statusBarColor = when (destination) {
+                Destination.HOME -> android.graphics.Color.rgb(203, 216, 198)
+                Destination.SPLASH -> android.graphics.Color.rgb(23, 60, 42)
+                Destination.CAPTURE, Destination.CLASSIFYING -> android.graphics.Color.rgb(24, 53, 34)
+                Destination.REVEAL -> android.graphics.Color.rgb(20, 12, 50)
+            }
+            window.navigationBarColor = if (darkSurface) {
+                android.graphics.Color.rgb(32, 16, 68)
+            } else {
+                android.graphics.Color.rgb(245, 247, 239)
+            }
+            WindowInsetsControllerCompat(window, window.decorView).apply {
+                isAppearanceLightStatusBars = !darkSurface
+                isAppearanceLightNavigationBars = !darkSurface
+            }
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         destination = Destination.CAPTURE
@@ -127,8 +181,6 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
             destination = Destination.CAPTURE
         }
     }
-    val toast = { text: String -> Toast.makeText(context, text, Toast.LENGTH_LONG).show() }
-
     LaunchedEffect(Unit) {
         try {
             cards.addAll(store.load())
@@ -153,7 +205,7 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
     Box(Modifier.fillMaxSize().background(BColor.Outer)) {
         val viewed = viewing
         when {
-            destination == Destination.SPLASH -> SplashScreen { destination = Destination.HOME }
+            destination == Destination.SPLASH -> SplashScreen(onDone = { destination = Destination.HOME })
             destination == Destination.CAPTURE -> CaptureScreen(
                 onPhotoCaptured = { path ->
                     destination = Destination.CLASSIFYING
@@ -191,6 +243,10 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
                     species = item,
                     number = if (saved) cards.size.coerceAtLeast(1) else cards.size + 1,
                     onBack = { destination = Destination.HOME },
+                    onShare = { shareCard(item) },
+                    shareLabel = if (isExportingCard) "Exporting…" else "Share",
+                    isSharing = isExportingCard,
+                    onCardBounds = { specimenCardBounds = it },
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         if (!saved) {
@@ -199,10 +255,11 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
                                 if (isNew) "Save to BioDex  +$xp XP" else "Save duplicate  +$xp XP",
                                 true, Modifier.fillMaxWidth(),
                             ) {
-                                try {
+                                scope.launch {
+                                  try {
                                     val (updated, award) = progressStore.record(item, isNew, find.capturedAt)
                                     val base = card.copy(xp = award.xp + award.bonusXp)
-                                    val file = CardArtwork.render(context, base, item)
+                                    val file = withContext(Dispatchers.IO) { CardArtwork.render(context, base, item) }
                                     val done = base.copy(cardPath = file.absolutePath)
                                     store.save(done)
                                     cards.removeAll { it.id == done.id }
@@ -215,16 +272,14 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
                                         if (award.bonusXp > 0) append("  ·  Mission “${award.missionTitle}” +${award.bonusXp} XP")
                                         if (award.levelUp) append("  ·  Level up!")
                                     }
-                                } catch (exception: Exception) {
+                                  } catch (exception: Exception) {
                                     toast("Could not save your card: ${exception.localizedMessage}")
+                                  }
                                 }
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            SpecimenButton("Share", false, Modifier.weight(1f)) {
-                                shareCard(context, card, item, toast)
-                            }
-                            SpecimenButton(if (saved) "Done" else "Retake", false, Modifier.weight(1f)) {
+                            SpecimenButton(if (saved) "Done" else "Retake", false, Modifier.fillMaxWidth()) {
                                 destination = if (saved) Destination.HOME else Destination.CAPTURE
                             }
                         }
@@ -243,12 +298,18 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
         if (viewed != null && destination == Destination.HOME) {
             val item = speciesById[viewed.first.speciesId]
             if (item != null) {
-                SpecimenScreen(viewed.first, item, viewed.second, onBack = { viewing = null }) {
-                    SpecimenButton("Share card", true, Modifier.fillMaxWidth()) {
-                        shareCard(context, viewed.first, item, toast)
-                    }
-                }
+                SpecimenScreen(
+                    viewed.first,
+                    item,
+                    viewed.second,
+                    onBack = { viewing = null },
+                    onShare = { shareCard(item) },
+                    shareLabel = if (isExportingCard) "Exporting…" else "Share",
+                    isSharing = isExportingCard,
+                    onCardBounds = { specimenCardBounds = it },
+                )
             }
+
         }
         banner?.let {
             Box(
@@ -263,25 +324,12 @@ private fun BioDexApp(species: List<Species>, modelSpecies: List<Species>, class
     }
 }
 
-private fun shareCard(context: Context, card: CollectionCard, species: Species, report: (String) -> Unit) {
-    try {
-        val cardFile = if (card.cardPath.isNotBlank() && File(card.cardPath).exists()) {
-            File(card.cardPath)
-        } else {
-            CardArtwork.render(context, card, species)
-        }
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.provider", cardFile)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "image/png"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_TEXT, "My BioDex field find: ${species.name}")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        context.startActivity(Intent.createChooser(intent, "Share your field card"))
-    } catch (exception: Exception) {
-        report("Could not share card: ${exception.localizedMessage ?: "unknown error"}")
+private fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is android.content.ContextWrapper -> baseContext.findActivity()
+        else -> null
     }
-}
 
 @Composable
 private fun ClassifyingScreen() {
@@ -294,6 +342,12 @@ private fun ClassifyingScreen() {
         BText("Checking the plant field guide…", 20f, Color.White, Modifier.padding(top = 20.dp), family = com.biodex.ui.Serif)
         BText("BioCLIP runs on this device. The photo stays local.", 12f, Color(0xB3FFFFFF), Modifier.padding(top = 8.dp))
     }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun ClassifyingScreenPreview() {
+    MaterialTheme { ClassifyingScreen() }
 }
 
 private fun Float.asScore(): String = String.format(java.util.Locale.ROOT, "%.3f", this)

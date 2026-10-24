@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.widthIn
@@ -51,15 +52,22 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.only
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
@@ -277,62 +285,143 @@ private fun FigmaIntro() {
 
 @Composable
 private fun ExplorerCard(progress: Progress) {
-    val progressFraction = progress.levelXp / XP_PER_LEVEL.toFloat()
+    val progressFraction = (progress.levelXp / XP_PER_LEVEL.toFloat()).coerceIn(0f, 1f)
+    val cardShape = RoundedCornerShape(26.dp)
     Box(
         Modifier.fillMaxWidth()
-            .background(
-                cssGradient(145f, 0f to BioDexTheme.Color.Forest, 1f to BioDexTheme.Color.ForestDeep),
-                RoundedCornerShape(BioDexTheme.Size.LargeCornerRadius),
+            .shadow(
+                18.dp,
+                cardShape,
+                ambientColor = Color(0x3B143925),
+                spotColor = Color(0x3B143925),
             )
-            .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(BioDexTheme.Size.LargeCornerRadius))
+            .clip(cardShape)
             .drawBehind {
-                drawCircle(Color(0x38B7D488), 100.dp.toPx(), Offset(size.width * 0.92f, size.height * 0.12f))
-                drawCircle(Color(0x16ECC468), 90.dp.toPx(), Offset(size.width + 5.dp.toPx(), size.height + 20.dp.toPx()))
+                drawRect(cssGradient(145f, 0f to Color(0xFF1B4932), 0.76f to Color(0xFF0B2B1C)))
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x21E19D3B), Color.Transparent),
+                        center = Offset(size.width * 0.08f, size.height * 1.05f),
+                        radius = size.width * 0.32f,
+                    ),
+                )
+                drawRect(
+                    Brush.radialGradient(
+                        colors = listOf(Color(0x3BC1DE91), Color.Transparent),
+                        center = Offset(size.width * 0.91f, size.height * 0.05f),
+                        radius = size.width * 0.28f,
+                    ),
+                )
             }
-            .padding(20.dp),
+            .border(1.dp, Color(0x4DEFC266), cardShape),
     ) {
-        Column {
+        Column(Modifier.padding(start = 20.dp, top = 21.dp, end = 20.dp, bottom = 18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         BIcon("compass", 14f, Color(0xFFE8B65E))
                         BText("EXPLORER LEVEL", 8f, Color(0xFFE8B65E), weight = 700, spacing = 1.3f)
                     }
-                    BText(progress.levelName, 29f, Color(0xFFF6F4E9), Modifier.padding(top = 7.dp), family = Serif, lineHeight = 31f)
-                    BText(
-                        "Keep discovering to unlock the ${progress.nextLevelName} rank.",
-                        9f, Color(0xFFADC1B2), Modifier.padding(top = 8.dp), lineHeight = 13f,
+                    BText(progress.levelName, 30f, Color(0xFFF6F4E9), Modifier.padding(top = 7.dp), family = Serif, lineHeight = 30f)
+                    androidx.compose.material3.Text(
+                        text = buildAnnotatedString {
+                            append("Keep discovering to unlock ")
+                            withStyle(SpanStyle(color = Color(0xFFF1D393), fontWeight = FontWeight.SemiBold)) {
+                                append(progress.nextLevelName)
+                            }
+                            append(".")
+                        },
+                        modifier = Modifier.padding(top = 8.dp).widthIn(max = 240.dp),
+                        style = TextStyle(
+                            color = Color(0xFFB7C8BB),
+                            fontFamily = Sans,
+                            fontSize = 9.sp,
+                            lineHeight = 13.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        ),
                     )
                 }
                 LevelOrbit(progress.level, progressFraction)
             }
-            Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
-                Row(Modifier.fillMaxWidth().padding(bottom = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    BText("NEXT RANK", 7f, Color(0xFF89A191), weight = 700, spacing = 1f)
+            Column(Modifier.fillMaxWidth().padding(top = 9.dp)) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x17FFFFFF)))
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 13.dp, bottom = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Box(
+                            Modifier.size(5.dp)
+                                .background(Color(0xFFAACA8E), CircleShape)
+                                .border(1.dp, Color(0x8CAACA8E), CircleShape),
+                        )
+                        BText("NEXT · ${progress.nextLevelName.uppercase()}", 7f, Color(0xFF89A191), weight = 700, spacing = 1f)
+                    }
                     Row {
                         BText("${fmt(progress.levelXp)} ", 9f, Color(0xFFF4D28D), weight = 700)
                         BText("/ ${fmt(XP_PER_LEVEL)} XP", 9f, Color(0xFF8FA496))
                     }
                 }
-                Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(Color(0x1AFFFFFF))) {
-                    Box(
-                        Modifier.fillMaxWidth(progressFraction.coerceIn(0f, 1f)).height(7.dp)
-                            .background(cssGradient(90f, 0f to Color(0xFFE68B34), 1f to Color(0xFFFFD16A)), CircleShape),
-                    )
+                Box(
+                    Modifier.fillMaxWidth()
+                        .height(8.dp)
+                        .clip(CircleShape)
+                        .background(Color(0x1AFFFFFF))
+                        .border(1.dp, Color(0x0AFFFFFF), CircleShape)
+                        .padding(1.dp),
+                ) {
+                    Box(Modifier.fillMaxWidth(progressFraction).fillMaxHeight()) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .clip(CircleShape)
+                                .background(cssGradient(90f, 0f to Color(0xFFE68B34), 1f to Color(0xFFFFD16A))),
+                        )
+                        if (progressFraction > 0f) {
+                            Box(
+                                Modifier.align(Alignment.CenterEnd)
+                                    .offset(x = 4.dp)
+                                    .size(10.dp)
+                                    .border(2.dp, Color(0xFF234B35), CircleShape)
+                                    .background(Color(0xFFFFD676), CircleShape),
+                            )
+                        }
+                    }
                 }
             }
         }
+        Box(
+            Modifier.align(Alignment.TopStart)
+                .padding(start = 20.dp)
+                .width(72.dp)
+                .height(3.dp)
+                .background(
+                    cssGradient(90f, 0f to Color(0xFFE29135), 1f to Color(0xFFF5CF75)),
+                    RoundedCornerShape(bottomStart = 99.dp, bottomEnd = 99.dp),
+                ),
+        )
     }
 }
 
 @Composable
 private fun LevelOrbit(level: Int, fraction: Float) {
     Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(Modifier.requiredSize(82.dp)) {
+            val center = Offset(size.width / 2f, size.height / 2f)
             val stroke = 5.dp.toPx()
-            drawArc(Color(0x1FFFFFFF), -90f, 360f, false, style = Stroke(stroke))
+            val radius = 32.dp.toPx()
+            drawCircle(Color(0x0AFFFFFF), radius, center)
+            drawCircle(Color(0x14FFFFFF), 30.dp.toPx(), center, style = Stroke(1.dp.toPx()))
+            drawCircle(
+                Color(0x1FEFC165),
+                40.dp.toPx(),
+                center,
+                style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 3.dp.toPx()))),
+            )
+            drawCircle(Color(0x1FFFFFFF), radius, center, style = Stroke(stroke))
             drawArc(
                 Color(0xFFEFB54F), -90f, 360f * fraction.coerceIn(0f, 1f), false,
+                topLeft = Offset(center.x - radius, center.y - radius),
+                size = Size(radius * 2f, radius * 2f),
                 style = Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
             )
         }
@@ -452,6 +541,16 @@ private fun FigmaSearchRow(query: String, onQuery: (String) -> Unit) {
 private fun DashboardPreview() {
     MaterialTheme {
         Surface { Dashboard(emptyList(), emptyMap(), Progress(), 0L, { _, _ -> }, {}) }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390)
+@Composable
+private fun ExplorerCardPreview() {
+    MaterialTheme {
+        Surface(Modifier.padding(16.dp)) {
+            ExplorerCard(Progress(xp = 2_620))
+        }
     }
 }
 

@@ -36,9 +36,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntRect
 import com.biodex.data.CollectionCard
 import com.biodex.data.Rarity
 import com.biodex.data.Species
@@ -47,6 +51,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.hypot
+import kotlin.math.roundToInt
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 
 fun formatCapturedAt(millis: Long): String =
     SimpleDateFormat("MMMM d, yyyy, h:mm a", Locale.US).format(Date(millis))
@@ -61,9 +69,20 @@ fun SpecimenScreen(
     species: Species,
     number: Int,
     onBack: () -> Unit,
+    onShare: (() -> Unit)? = null,
+    shareLabel: String = "Share",
+    isSharing: Boolean = false,
+    onCardBounds: (IntRect) -> Unit = {},
     actions: @Composable () -> Unit = {},
 ) {
     val rarity = Rarity.of(species)
+    val displayName = species.name.takeIf { it.isNotBlank() } ?: "Unknown species"
+    val scientificName = species.scientificName.takeIf { it.isNotBlank() } ?: "Scientific name unavailable"
+    val rarityAccent = when (rarity) {
+        Rarity.Common -> BioDexTheme.Color.Common
+        Rarity.Uncommon -> BioDexTheme.Color.Uncommon
+        Rarity.Rare -> BioDexTheme.Color.Rare
+    }
     val photo = remember(card.photoPath) {
         runCatching { PhotoBitmap.decode(card.photoPath, sampleSize = 2).asImageBitmap() }.getOrNull()
     }
@@ -92,6 +111,7 @@ fun SpecimenScreen(
     ) {
         val screenWidth = maxWidth
         val screenHeight = maxHeight
+        val photoHeight = (screenHeight * 0.34f).coerceIn(128.dp, 390.dp)
         Column(
             Modifier
                 .fillMaxSize()
@@ -111,7 +131,31 @@ fun SpecimenScreen(
                     }
                     BText("BioDex", 12f, Color.White, weight = 600)
                 }
-                BText("SPECIMEN #%04d".format(number), 9f, Color(0xFFE9DBA6), weight = 700, spacing = 1.2f)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    BText("SPECIMEN #%04d".format(number), 9f, Color(0xFFE9DBA6), weight = 700, spacing = 1.2f)
+                    if (onShare != null) {
+                        Row(
+                            Modifier
+                                .background(Color(0x17FFFFFF), RoundedCornerShape(10.dp))
+                                .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(10.dp))
+                                .pressable { if (!isSharing) onShare() }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            if (isSharing) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(14.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                BIcon("share", 16f, Color.White)
+                            }
+                            BText(shareLabel, 8f, Color.White, weight = 700)
+                        }
+                    }
+                }
             }
 
             Box(
@@ -119,6 +163,13 @@ fun SpecimenScreen(
                     .widthIn(max = 560.dp)
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp)
+                    .onGloballyPositioned { coordinates ->
+                        val position = coordinates.positionInWindow()
+                        val left = position.x.roundToInt()
+                        val top = position.y.roundToInt()
+                        onCardBounds(IntRect(left, top, left + coordinates.size.width, top + coordinates.size.height))
+                    }
+                    .shadow(18.dp, RoundedCornerShape(28.dp), ambientColor = Color(0x66000000), spotColor = Color(0x88000000))
                     .background(
                         cssGradient(115f, 0f to Color(0xFFFFE276), 0.48f to Color(0xFFDC9224), 0.75f to Color(0xFFFFDF64), 1f to Color(0xFFB87319)),
                         RoundedCornerShape(28.dp),
@@ -131,30 +182,32 @@ fun SpecimenScreen(
                         .fillMaxWidth()
                         .background(cssGradient(160f, 0f to Color(0xFF23114C), 0.5f to Color(0xFF3B1B70), 1f to Color(0xFF25114F)), RoundedCornerShape(21.dp))
                         .border(2.dp, Color(0xD1FFE064), RoundedCornerShape(21.dp))
-                        .padding(13.dp),
+                        .padding(11.dp),
                 ) {
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 87.dp)
+                            .heightIn(min = 75.dp)
                             .border(1.5.dp, Color(0xFFF3CF55), RoundedCornerShape(18.dp))
                             .padding(horizontal = 8.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         LeafBadge()
                         Column(Modifier.weight(1f).padding(horizontal = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            val nameSize = (screenWidth.value * 0.08f).coerceIn(25f, 39f).let { if (species.name.length > 14) it * 0.72f else it }
-                            BText(species.name, nameSize, Color.White, family = Serif, align = TextAlign.Center, lineHeight = nameSize * 1.05f, maxLines = 2)
-                            BText(species.scientificName, 16f, Color(0xFFD6C7EC), Modifier.padding(top = 2.dp), family = SerifItalic, italic = true, align = TextAlign.Center, maxLines = 2)
+                            val nameSize = (screenWidth.value * 0.08f).coerceIn(25f, 39f).let {
+                                if (displayName.length > 14) it * 0.72f else it
+                            }
+                            BText(displayName, nameSize, Color.White, family = Serif, align = TextAlign.Center, lineHeight = nameSize * 1.05f, maxLines = 2)
+                            BText(scientificName, 16f, Color(0xFFD6C7EC), Modifier.padding(top = 2.dp), family = SerifItalic, italic = true, align = TextAlign.Center, maxLines = 2)
                         }
                         LeafBadge()
                     }
 
                     Box(
                         Modifier
-                            .padding(14.dp)
+                            .padding(10.dp)
                             .fillMaxWidth()
-                            .height(minOf(screenHeight * 0.43f, 390.dp))
+                            .height(photoHeight)
                             .background(Color(0xFF1B0D3F), RoundedCornerShape(22.dp))
                             .border(5.dp, Gold, RoundedCornerShape(22.dp))
                             .padding(5.dp)
@@ -173,7 +226,7 @@ fun SpecimenScreen(
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .heightIn(min = 81.dp)
+                            .heightIn(min = 68.dp)
                             .background(Color(0x9C0D0625), RoundedCornerShape(17.dp))
                             .padding(horizontal = 17.dp, vertical = 16.dp),
                         contentAlignment = Alignment.CenterStart,
@@ -185,14 +238,20 @@ fun SpecimenScreen(
                     }
 
                     Row(Modifier.padding(top = 12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Box(
+                        Row(
                             Modifier
                                 .weight(1.55f)
-                                .background(cssGradient(135f, 0f to Color(0xFFFFE16A), 1f to Color(0xFFE69C26)), RoundedCornerShape(14.dp))
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center,
+                                .background(rarityAccent.copy(alpha = 0.15f), RoundedCornerShape(14.dp))
+                                .border(1.dp, rarityAccent.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            BText("${rarity.letter} ★ ${rarity.label}", 15f, Color(0xFF271242), weight = 700)
+                            BIcon("spark", 18f, rarityAccent)
+                            Column {
+                                BText("RARITY", 8f, rarityAccent, weight = 700, spacing = 0.8f)
+                                BText(rarity.label, 13f, Color.White, weight = 700)
+                            }
                         }
                         Row(
                             Modifier.weight(0.7f).padding(start = 12.dp),
@@ -200,7 +259,7 @@ fun SpecimenScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             BText("Quality", 11f, Color(0xFFD7C9E8))
-                            BText("${card.quality}", 23f, Color.White, family = Serif)
+                            BText(card.quality.takeIf { it > 0 }?.toString() ?: "—", 23f, Color.White, family = Serif)
                         }
                     }
 
@@ -212,10 +271,15 @@ fun SpecimenScreen(
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
-                        BText("Captured on ${formatCapturedAt(card.capturedAt)}", 10f, Color(0xFFEEE7F6), lineHeight = 14f)
+                        BText(
+                            if (card.capturedAt > 0L) "Captured on ${formatCapturedAt(card.capturedAt)}" else "Capture date unavailable",
+                            10f,
+                            Color(0xFFEEE7F6),
+                            lineHeight = 14f,
+                        )
                         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             Box(Modifier.padding(top = 4.dp).size(3.dp).background(Color(0xFFE9B83D), CircleShape))
-                            BText(card.location ?: "Location not recorded", 10f, Color(0xFFEEE7F6), lineHeight = 14f)
+                            BText(card.location?.takeIf { it.isNotBlank() } ?: "Location not recorded", 10f, Color(0xFFEEE7F6), lineHeight = 14f)
                         }
                     }
                 }
@@ -251,3 +315,31 @@ fun SpecimenButton(label: String, filled: Boolean, modifier: Modifier = Modifier
     ) { BText(label, 13f, if (filled) Color.White else Color(0xFFEEE7F6), weight = 700) }
 }
 
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun SpecimenScreenPreview() {
+    SpecimenScreenPreviewFor("Rare", "Swiss cheese plant", "Monstera deliciosa")
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun CommonSpecimenScreenPreview() {
+    SpecimenScreenPreviewFor("Common", "Sweet basil", "Ocimum basilicum")
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun UncommonSpecimenScreenPreview() {
+    SpecimenScreenPreviewFor("Uncommon", "Bird's nest fern", "Asplenium nidus")
+}
+
+@Composable
+private fun SpecimenScreenPreviewFor(rarity: String, name: String, scientificName: String) {
+    val species = Species("preview", name, scientificName, rarity, "A field specimen recorded in your local BioDex.")
+    val card = CollectionCard("preview-card", species.id, 0.91f, 92, 1_782_000_000_000, "", "", species.detail)
+    MaterialTheme {
+        Surface {
+            SpecimenScreen(card, species, 1, {}, onShare = {})
+        }
+    }
+}

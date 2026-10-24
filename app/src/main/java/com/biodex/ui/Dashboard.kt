@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -28,6 +29,10 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -35,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,15 +62,24 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalContext
+import com.biodex.data.CardSortOption
+import com.biodex.data.CardSortStore
 import com.biodex.data.CollectionCard
 import com.biodex.data.Progress
 import com.biodex.data.Rarity
 import com.biodex.data.Species
 import com.biodex.data.TOTAL_PLANTS
 import com.biodex.data.XP_PER_LEVEL
+import com.biodex.data.sortedCards
 import com.biodex.util.PhotoBitmap
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.text.NumberFormat
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 val CardTones = listOf(Color(0xFFEDF5E2), Color(0xFFE6F3EE), Color(0xFFF8EDCE), Color(0xFFF5E9E0))
 
@@ -85,38 +100,53 @@ fun Dashboard(
     onScan: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
-    var ascending by remember { mutableStateOf(false) }
-    var sortKey by remember { mutableStateOf(SortKey.NUMBER) }
-
-    val numbered = remember(cards) {
-        cards.sortedBy { it.capturedAt }.mapIndexed { index, card -> card to index + 1 }
-    }
-    val visible = remember(numbered, query, ascending, sortKey) {
-        val q = query.trim().lowercase()
-        numbered
-            .filter { (card, _) ->
-                val s = speciesById[card.speciesId]
-                q.isEmpty() || (s != null && (s.name.lowercase().contains(q) || s.scientificName.lowercase().contains(q)))
+    val context = LocalContext.current
+    val sortStore = remember(context) { CardSortStore(context) }
+    var sortOption by remember(sortStore) { mutableStateOf(sortStore.load()) }
+    var sortMenuExpanded by remember { mutableStateOf(false) }
+    val cardSnapshot = cards.toList()
+    val rows by produceState(
+        initialValue = emptyList<List<Pair<CollectionCard, Int>>>(),
+        cardSnapshot,
+        query,
+        sortOption,
+        speciesById,
+    ) {
+        value = withContext(Dispatchers.Default) {
+            val numbered = cardSnapshot
+                .sortedWith(compareBy<CollectionCard> { it.capturedAt }.thenBy { it.id })
+                .mapIndexed { index, card -> card to index + 1 }
+            val q = query.trim().lowercase()
+            val filtered = numbered.filter { (card, _) ->
+                val item = speciesById[card.speciesId]
+                q.isEmpty() || (item != null &&
+                    (item.name.lowercase().contains(q) || item.scientificName.lowercase().contains(q)))
             }
-            .sortedWith(
-                when (sortKey) {
-                    SortKey.NUMBER, SortKey.DATE -> compareBy { (card, number) -> if (sortKey == SortKey.DATE) card.capturedAt else number.toLong() }
-                    SortKey.NAME -> compareBy { (card, _) -> speciesById[card.speciesId]?.name?.lowercase() ?: "" }
-                },
-            )
-            .let { if (ascending) it else it.reversed() }
+            val numberedById = filtered.associate { it.first.id to it }
+            sortedCards(filtered.map { it.first }, speciesById, sortOption)
+                .mapNotNull { numberedById[it.id] }
+                .chunked(2)
+        }
     }
-    val distinct = cards.map { it.speciesId }.toSet().size
-    val totalXp = progress.xp
 
     Box(Modifier.fillMaxSize().background(BColor.Outer), contentAlignment = Alignment.TopCenter) {
         Box(
             Modifier
-                .widthIn(max = 560.dp)
+                .widthIn(max = BioDexTheme.Size.DashboardMaxWidth)
                 .fillMaxSize()
                 .background(BColor.Page)
                 .drawBehind {
-                    drawCircle(Color(0x8CD9E8BC), 130.dp.toPx(), Offset(size.width + 15.dp.toPx(), 194.dp.toPx()))
+                    drawCircle(Color(0xBFC7DDAE), 175.dp.toPx(), Offset(size.width + 10.dp.toPx(), 4.dp.toPx()))
+                    val spacing = 22.dp.toPx()
+                    var y = 8.dp.toPx()
+                    while (y < size.height) {
+                        var x = 8.dp.toPx()
+                        while (x < size.width) {
+                            drawCircle(Color(0x18315942), 1.dp.toPx(), Offset(x, y))
+                            x += spacing
+                        }
+                        y += spacing
+                    }
                 },
         ) {
             LazyColumn(Modifier.fillMaxSize()) {
@@ -124,22 +154,39 @@ fun Dashboard(
                     Column(
                         Modifier
                             .windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(horizontal = 22.dp),
+                            .padding(horizontal = BioDexTheme.Size.PageHorizontalPadding),
                     ) {
-                        Header(progress.level)
-                        Intro(progress.activeStreak(today))
-                        LevelCard(progress)
-                        ProgressCard(distinct)
-                        MissionCard(progress, today, onScan)
-                        SearchRow(query) { query = it }
-                        SectionHead(cards.size, totalXp, ascending, sortKey, { sortKey = sortKey.next() }) { ascending = !ascending }
-                        Box(Modifier.height(17.dp))
+                        FigmaHeader(progress.levelName)
+                        FigmaIntro()
+                        ExplorerCard(progress)
+                        FieldStats(progress.activeStreak(today), cards.size, progress.xp)
+                        CollectionHeader(
+                            cards = cards,
+                            sortOption = sortOption,
+                            menuExpanded = sortMenuExpanded,
+                            onMenuExpanded = { sortMenuExpanded = it },
+                            onSort = { selected ->
+                                try {
+                                    sortStore.save(selected)
+                                    sortOption = selected
+                                } catch (exception: IllegalStateException) {
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        exception.localizedMessage ?: "Could not save the sort preference.",
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            },
+                        )
+                        FigmaSearchRow(query) { query = it }
+                        Box(Modifier.height(BioDexTheme.Size.CardGridGap))
                     }
                 }
-                items(visible.chunked(2), key = { row -> row.first().first.id }) { row ->
+                items(rows, key = { row -> row.first().first.id }) { row ->
                     Row(
-                        Modifier.padding(horizontal = 22.dp).padding(bottom = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        Modifier.padding(horizontal = BioDexTheme.Size.PageHorizontalPadding)
+                            .padding(bottom = BioDexTheme.Size.CardGridGap),
+                        horizontalArrangement = Arrangement.spacedBy(BioDexTheme.Size.CardGridGap),
                     ) {
                         row.forEach { (card, number) ->
                             val species = speciesById[card.speciesId]
@@ -151,18 +198,286 @@ fun Dashboard(
                     }
                 }
                 item {
-                    if (visible.isEmpty()) {
+                    if (rows.isEmpty()) {
                         BText(
-                            if (cards.isEmpty()) "Nothing here yet — tap the camera button to start your BioDex." else "No captured plants match your search.",
-                            13f, BColor.Muted2,
+                            if (cards.isEmpty()) "Your field log is waiting for its first discovery." else "No captured plants match your search.",
+                            13f, BioDexTheme.Color.TextMuted,
                             Modifier.fillMaxWidth().padding(horizontal = 30.dp, vertical = 24.dp),
                             align = TextAlign.Center, lineHeight = 19f,
                         )
                     }
-                    Box(Modifier.height(80.dp))
+                    Box(Modifier.height(106.dp))
                 }
             }
-            CaptureFloatingActionButton(Modifier.align(Alignment.BottomCenter), onScan)
+            CaptureFloatingActionButton(Modifier.align(Alignment.BottomEnd), onScan)
+        }
+    }
+}
+
+@Composable
+private fun FigmaHeader(rank: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(
+                Modifier.size(36.dp).rotate(-3f)
+                    .background(
+                        cssGradient(145f, 0f to BioDexTheme.Color.Forest, 1f to BioDexTheme.Color.ForestDeep),
+                        RoundedCornerShape(12.dp, 12.dp, 12.dp, 4.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) { BIcon("leaf", 21f, Color(0xFFF8F5E9)) }
+            Wordmark(25f, BioDexTheme.Color.Ink)
+        }
+        Row(
+            Modifier.background(Color(0xC2FFFFFF), CircleShape)
+                .border(1.dp, Color(0x1F224E33), CircleShape)
+                .padding(start = 5.dp, top = 5.dp, bottom = 5.dp, end = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                Modifier.size(29.dp)
+                    .background(cssGradient(145f, 0f to Color(0xFFFFD16D), 1f to Color(0xFFDD8C2E)), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { BIcon("trophy", 16f, Color(0xFF4B310F)) }
+            Column {
+                BText("FIELD RANK", 7f, BColor.Muted, weight = 700, spacing = 0.7f)
+                BText(rank, 10f, BioDexTheme.Color.Forest, weight = 700, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FigmaIntro() {
+    Column(Modifier.padding(start = 4.dp, end = 4.dp, top = 13.dp, bottom = 17.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(
+                Modifier.size(7.dp)
+                    .background(BioDexTheme.Color.Amber, CircleShape)
+                    .border(2.dp, Color(0xFFF6EFE0), CircleShape),
+            )
+            BText("FIELD LOG · EXPEDITION 14", 9f, Color(0xFF66806C), weight = 700, spacing = 1.5f)
+        }
+        BText(
+            "Ready to explore?", 42f, BioDexTheme.Color.Ink,
+            Modifier.padding(top = 7.dp), family = Serif, lineHeight = 44f, spacing = -1.2f, maxLines = 1,
+        )
+        BText(
+            "The wild is full of discoveries. Scan a plant to add its card to your BioDex.",
+            12f, BioDexTheme.Color.TextMuted,
+            Modifier.padding(top = 9.dp), lineHeight = 17f,
+        )
+    }
+}
+
+@Composable
+private fun ExplorerCard(progress: Progress) {
+    val progressFraction = progress.levelXp / XP_PER_LEVEL.toFloat()
+    Box(
+        Modifier.fillMaxWidth()
+            .background(
+                cssGradient(145f, 0f to BioDexTheme.Color.Forest, 1f to BioDexTheme.Color.ForestDeep),
+                RoundedCornerShape(BioDexTheme.Size.LargeCornerRadius),
+            )
+            .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(BioDexTheme.Size.LargeCornerRadius))
+            .drawBehind {
+                drawCircle(Color(0x38B7D488), 100.dp.toPx(), Offset(size.width * 0.92f, size.height * 0.12f))
+                drawCircle(Color(0x16ECC468), 90.dp.toPx(), Offset(size.width + 5.dp.toPx(), size.height + 20.dp.toPx()))
+            }
+            .padding(20.dp),
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        BIcon("compass", 14f, Color(0xFFE8B65E))
+                        BText("EXPLORER LEVEL", 8f, Color(0xFFE8B65E), weight = 700, spacing = 1.3f)
+                    }
+                    BText(progress.levelName, 29f, Color(0xFFF6F4E9), Modifier.padding(top = 7.dp), family = Serif, lineHeight = 31f)
+                    BText(
+                        "Keep discovering to unlock the ${progress.nextLevelName} rank.",
+                        9f, Color(0xFFADC1B2), Modifier.padding(top = 8.dp), lineHeight = 13f,
+                    )
+                }
+                LevelOrbit(progress.level, progressFraction)
+            }
+            Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 7.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    BText("NEXT RANK", 7f, Color(0xFF89A191), weight = 700, spacing = 1f)
+                    Row {
+                        BText("${fmt(progress.levelXp)} ", 9f, Color(0xFFF4D28D), weight = 700)
+                        BText("/ ${fmt(XP_PER_LEVEL)} XP", 9f, Color(0xFF8FA496))
+                    }
+                }
+                Box(Modifier.fillMaxWidth().height(7.dp).clip(CircleShape).background(Color(0x1AFFFFFF))) {
+                    Box(
+                        Modifier.fillMaxWidth(progressFraction.coerceIn(0f, 1f)).height(7.dp)
+                            .background(cssGradient(90f, 0f to Color(0xFFE68B34), 1f to Color(0xFFFFD16A)), CircleShape),
+                    )
+                }
+            }
+        }
+        Box(
+            Modifier.align(Alignment.BottomEnd).padding(end = (-30).dp, bottom = (-60).dp).size(180.dp)
+                .border(1.dp, Color(0x2EECC468), CircleShape),
+        )
+    }
+}
+
+@Composable
+private fun LevelOrbit(level: Int, fraction: Float) {
+    Box(Modifier.size(76.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 5.dp.toPx()
+            drawArc(Color(0x1FFFFFFF), -90f, 360f, false, style = Stroke(stroke))
+            drawArc(
+                Color(0xFFEFB54F), -90f, 360f * fraction.coerceIn(0f, 1f), false,
+                style = Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+            )
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            BText("LVL", 7f, Color(0xFF9DB2A3), weight = 700, spacing = 1f)
+            BText("%02d".format(level), 24f, Color(0xFFFFF8E8), family = Serif, lineHeight = 25f)
+        }
+    }
+}
+
+@Composable
+private fun FieldStats(streak: Int, cards: Int, xp: Int) {
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FieldStat(Modifier.weight(1f), "spark", "$streak ${if (streak == 1) "day" else "days"}", "Explorer streak", Color(0xFFFFEAD2), Color(0xFFB8682D))
+        FieldStat(Modifier.weight(1f), "leaf", "$cards", "Cards found", Color(0xFFDCEBDD), Color(0xFF34714D))
+        FieldStat(Modifier.weight(1f), "trophy", fmt(xp), "Total XP", Color(0xFFF5E9C6), Color(0xFF806023))
+    }
+}
+
+@Composable
+private fun FieldStat(
+    modifier: Modifier,
+    icon: String,
+    value: String,
+    label: String,
+    background: Color,
+    tint: Color,
+) {
+    Row(
+        modifier.heightIn(min = 52.dp)
+            .background(Color(0xD1FFFFFF), RoundedCornerShape(17.dp))
+            .border(1.dp, BioDexTheme.Color.Border, RoundedCornerShape(17.dp))
+            .padding(horizontal = 8.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(Modifier.size(29.dp).background(background, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+            BIcon(icon, 17f, tint)
+        }
+        Column(Modifier.weight(1f)) {
+            BText(value, 11f, Color(0xFF284D38), weight = 700, maxLines = 1)
+            BText(label, 7f, Color(0xFF8B988F), maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun CollectionHeader(
+    cards: List<CollectionCard>,
+    sortOption: CardSortOption,
+    menuExpanded: Boolean,
+    onMenuExpanded: (Boolean) -> Unit,
+    onSort: (CardSortOption) -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 27.dp),
+        verticalAlignment = Alignment.Bottom,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column {
+            BText("Your BioDex", 28f, Color(0xFF173B29), family = Serif, lineHeight = 31f)
+            BText("${cards.size} captured specimen cards", 9f, Color(0xFF86958B), Modifier.padding(top = 4.dp), spacing = 1f)
+        }
+        Box {
+            Row(
+                Modifier.background(Color(0xBFFFFFFF), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFFDCE4D9), RoundedCornerShape(12.dp))
+                    .pressable { onMenuExpanded(true) }
+                    .padding(start = 11.dp, end = 9.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                BText(sortOption.label, 9f, Color(0xFF55715E), weight = 700, maxLines = 1)
+                Box(Modifier.rotate(90f)) { BIcon("chevron", 14f, Color(0xFF55715E)) }
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { onMenuExpanded(false) }) {
+                CardSortOption.entries.forEach { option ->
+                    DropdownMenuItem(
+                        text = { BText(option.label, 12f, BioDexTheme.Color.Ink) },
+                        onClick = {
+                            onSort(option)
+                            onMenuExpanded(false)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FigmaSearchRow(query: String, onQuery: (String) -> Unit) {
+    Row(
+        Modifier.padding(vertical = 14.dp).fillMaxWidth().height(45.dp)
+            .background(Color(0xBFFFFFFF), RoundedCornerShape(14.dp))
+            .padding(horizontal = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        BIcon("search", 19f, Color(0xFF4C6D58))
+        Box(Modifier.weight(1f)) {
+            if (query.isEmpty()) BText("Search your discoveries", 12f, BColor.Muted)
+            BasicTextField(
+                value = query,
+                onValueChange = onQuery,
+                singleLine = true,
+                textStyle = TextStyle(fontFamily = Sans, fontSize = 12.sp, color = BColor.Ink),
+                cursorBrush = SolidColor(BColor.Forest),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun DashboardPreview() {
+    MaterialTheme {
+        Surface { Dashboard(emptyList(), emptyMap(), Progress(), 0L, { _, _ -> }, {}) }
+    }
+}
+
+@Preview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun DashboardCollectionPreview() {
+    val basil = Species("basil", "Sweet basil", "Ocimum basilicum", "Common")
+    val fern = Species("fern", "Bird's nest fern", "Asplenium nidus", "Uncommon")
+    val cards = listOf(
+        CollectionCard("preview-basil", basil.id, 0.94f, 86, 1_782_000_000_000, "", ""),
+        CollectionCard("preview-fern", fern.id, 0.88f, 72, 1_781_900_000_000, "", ""),
+    )
+    MaterialTheme {
+        Surface {
+            Dashboard(
+                cards = cards,
+                speciesById = listOf(basil, fern).associateBy { it.id },
+                progress = Progress(xp = 1_245, streak = 3),
+                today = 0L,
+                onOpen = { _, _ -> },
+                onScan = {},
+            )
         }
     }
 }
@@ -393,93 +708,77 @@ private fun SearchRow(query: String, onQuery: (String) -> Unit) {
     }
 }
 
-private enum class SortKey(val label: String) {
-    NUMBER("#"), DATE("Date"), NAME("Name");
-    fun next() = entries[(ordinal + 1) % entries.size]
-}
-
-@Composable
-private fun SectionHead(count: Int, xp: Int, ascending: Boolean, sortKey: SortKey, onKey: () -> Unit, onSort: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
-        Column {
-            BText("Captured plants", 27f, BColor.Ink, family = Serif, lineHeight = 30f)
-            BText(
-                "$count ${if (count == 1) "discovery" else "discoveries"} · ${fmt(xp)} XP earned",
-                11f, Color(0xFF87948A), Modifier.padding(top = 4.dp),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .background(Color.White, RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFE0E7DC), RoundedCornerShape(12.dp))
-                    .pressable(onKey)
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-            ) { BText(sortKey.label, 11f, Color(0xFF56705E), weight = 600) }
-            Row(
-                Modifier
-                    .background(Color.White, RoundedCornerShape(12.dp))
-                    .border(1.dp, Color(0xFFE0E7DC), RoundedCornerShape(12.dp))
-                    .pressable(onSort)
-                    .padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                BText(if (ascending) "Asc" else "Desc", 11f, Color(0xFF56705E), weight = 600)
-                Box(Modifier.rotate(if (ascending) -90f else 90f)) { BIcon("chevron", 13f, Color(0xFF56705E)) }
-            }
-        }
-    }
-}
-
 @Composable
 fun PlantCard(card: CollectionCard, species: Species, number: Int, onClick: () -> Unit) {
     val rarity = Rarity.of(species)
-    val tone = toneOf(species)
-    val shape = RoundedCornerShape(19.dp)
     val bitmap = remember(card.photoPath) {
         runCatching { PhotoBitmap.decode(card.photoPath, sampleSize = 4).asImageBitmap() }.getOrNull()
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(cssGradient(155f, 0f to tone, 0.65f to Color(0xFFFBFCF8), 1f to Color(0xFFFBFCF8)), shape)
-            .border(1.dp, Color(0xFFE2B344), shape)
-            .drawBehind {
-                drawRoundRect(Color.White, Offset(1.dp.toPx(), 1.dp.toPx()), Size(size.width - 2.dp.toPx(), size.height - 2.dp.toPx()), CornerRadius(18.dp.toPx()), Stroke(2.dp.toPx()))
-            }
+            .shadow(9.dp, RoundedCornerShape(BioDexTheme.Size.CardCornerRadius), ambientColor = Color(0x1727431F), spotColor = Color(0x1727431F))
+            .background(Color.White, RoundedCornerShape(BioDexTheme.Size.CardCornerRadius))
+            .border(1.dp, Color(0x1F1F4B31), RoundedCornerShape(BioDexTheme.Size.CardCornerRadius))
             .pressable(onClick)
-            .padding(start = 12.dp, end = 11.dp, top = 12.dp, bottom = 13.dp),
+            .clip(RoundedCornerShape(BioDexTheme.Size.CardCornerRadius)),
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-            BText("#%04d".format(number), 9f, Color(0xFF7B9180), weight = 700, spacing = 0.8f, modifier = Modifier.padding(top = 3.dp))
-            RarityBadge(rarity)
-        }
-        Box(Modifier.fillMaxWidth().height(101.dp).padding(top = 6.dp), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().height(BioDexTheme.Size.CardImageHeight).background(Color(0xFFDCE8D8))) {
             if (bitmap != null) {
-                Image(
-                    bitmap, null,
-                    Modifier.size(94.dp).clip(RoundedCornerShape(19.dp)).border(3.dp, Color(0xC7FFFFFF), RoundedCornerShape(19.dp)),
-                    contentScale = ContentScale.Crop,
-                )
+                Image(bitmap, species.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             } else {
-                BIcon("leaf", 44f, Color(0xFF285B3C))
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { BIcon("leaf", 52f, Color(0xFF285B3C)) }
+            }
+            Box(
+                Modifier.fillMaxSize().background(
+                    cssGradient(
+                        180f,
+                        0f to Color(0x5C081B10),
+                        0.38f to Color.Transparent,
+                        1f to Color(0x1408180F),
+                    ),
+                ),
+            )
+            Row(
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(9.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier.background(Color(0x730A2315), RoundedCornerShape(7.dp))
+                        .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(7.dp))
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                ) { BText("#%04d".format(number), 8f, Color(0xFFF4F5EB), weight = 700) }
+                FigmaRarityBadge(rarity)
             }
         }
-        BText(species.name, 12f, Color(0xFF294D37), Modifier.padding(top = 8.dp), weight = 700, maxLines = 1)
-        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            BText(species.scientificName, 9f, Color(0xFF93A098), Modifier.weight(1f), family = SerifItalic, italic = true, maxLines = 1)
-            BText("+${cardXp(card, species)} XP", 8f, BColor.Orange2, Modifier.padding(start = 4.dp), weight = 700)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                BText(species.name, 11f, Color(0xFF284D38), weight = 700, maxLines = 1)
+                BText(species.scientificName, 8f, Color(0xFF8B988F), Modifier.padding(top = 2.dp), family = SerifItalic, italic = true, maxLines = 1)
+                BText(
+                    "Captured ${SimpleDateFormat("MMM d", Locale.US).format(Date(card.capturedAt))}",
+                    7f, Color(0xFF7C8F82), Modifier.padding(top = 5.dp), weight = 600, spacing = 0.2f,
+                )
+            }
+            Box(
+                Modifier.background(Color(0xFFFFF0D7), RoundedCornerShape(7.dp))
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
+            ) { BText("+${cardXp(card, species)} XP", 7f, Color(0xFFA85C26), weight = 700) }
         }
     }
 }
 
 @Composable
-fun RarityBadge(rarity: Rarity) {
+private fun FigmaRarityBadge(rarity: Rarity) {
     val (fg, bg, stroke) = when (rarity) {
-        Rarity.Common -> Triple(Color(0xFF57755E), Color(0xBFFFFFFF), Color.Transparent)
-        Rarity.Uncommon -> Triple(Color(0xFF3D7967), Color(0xE6DDF2E7), Color.Transparent)
-        Rarity.Rare -> Triple(Color(0xFFB46626), Color(0xE6FFEFC7), Color(0x42D67F2A))
+        Rarity.Common -> Triple(Color(0xFFF7F7EB), Color(0xB90B2717), Color(0x38FFFFFF))
+        Rarity.Uncommon -> Triple(Color(0xFFD7FFE7), Color(0xB9145539), Color(0x38FFFFFF))
+        Rarity.Rare -> Triple(Color(0xFFFFE398), Color(0xB8583008), Color(0x8CFFD56F))
     }
     Row(
         Modifier.background(bg, CircleShape).border(1.dp, stroke, CircleShape).padding(horizontal = 6.dp, vertical = 4.dp),
@@ -493,18 +792,30 @@ fun RarityBadge(rarity: Rarity) {
 
 @Composable
 private fun CaptureFloatingActionButton(modifier: Modifier = Modifier, onScan: () -> Unit) {
-    Box(
+    Row(
         modifier
             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
-            .padding(bottom = 20.dp)
-            .size(72.dp)
-            .shadow(14.dp, CircleShape, ambientColor = Color(0x661A402B), spotColor = Color(0x661A402B))
-            .background(BColor.Forest, CircleShape)
-            .border(3.dp, Color.White, CircleShape)
+            .padding(end = 20.dp, bottom = 22.dp)
+            .height(68.dp)
+            .shadow(15.dp, RoundedCornerShape(22.dp), ambientColor = Color(0x40122E1C), spotColor = Color(0x40122E1C))
+            .background(
+                cssGradient(145f, 0f to Color(0xFF214F36), 1f to Color(0xFF0E3120)),
+                RoundedCornerShape(22.dp),
+            )
+            .border(1.dp, Color(0x38FFFFFF), RoundedCornerShape(22.dp))
             .pressable(onScan),
-        contentAlignment = Alignment.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        BIcon("camera", 34f, Color.White, strokeWidth = 2.2f)
+        Box(
+            Modifier.padding(start = 7.dp).size(52.dp)
+                .background(cssGradient(145f, 0f to Color(0xFFFFD477), 1f to Color(0xFFDF8A2D)), RoundedCornerShape(17.dp))
+                .border(1.dp, Color(0x7CFFEFc2), RoundedCornerShape(17.dp)),
+            contentAlignment = Alignment.Center,
+        ) { BIcon("camera", 23f, Color(0xFF3D2A0D)) }
+        Column(Modifier.padding(start = 11.dp, end = 10.dp)) {
+            BText("New discovery", 8f, Color(0xFFDBE4D8))
+            BText("Scan a plant", 12f, Color(0xFFFFFAF0), weight = 700)
+        }
+        Box(Modifier.padding(end = 12.dp)) { BIcon("chevron", 16f, Color.White) }
     }
 }
-

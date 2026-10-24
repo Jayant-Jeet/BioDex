@@ -36,6 +36,9 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.tooling.preview.Preview as ComposePreview
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -62,12 +65,13 @@ import java.util.UUID
 fun CaptureScreen(
     onPhotoCaptured: (String) -> Unit,
     onBack: () -> Unit,
+    previewMode: Boolean = false,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var hasPermission by remember {
         mutableStateOf(
-            ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            previewMode || ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
                 PackageManager.PERMISSION_GRANTED,
         )
     }
@@ -93,12 +97,12 @@ fun CaptureScreen(
     }
 
     LaunchedEffect(Unit) {
-        if (!hasPermission) requestPermission.launch(Manifest.permission.CAMERA)
+        if (!hasPermission && !previewMode) requestPermission.launch(Manifest.permission.CAMERA)
     }
 
-    DisposableEffect(previewView, hasPermission, lifecycleOwner) {
+    DisposableEffect(previewView, hasPermission, lifecycleOwner, previewMode) {
         var active = true
-        if (hasPermission) {
+        if (hasPermission && !previewMode) {
             val providerFuture = ProcessCameraProvider.getInstance(context)
             providerFuture.addListener({
                 if (!active) return@addListener
@@ -165,9 +169,14 @@ fun CaptureScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF183522))) {
         val frameWidth = minOf(maxWidth * 0.73f, 380.dp)
         val frameHeight = minOf(maxHeight * 0.52f, 430.dp)
-        if (hasPermission) {
+        if (previewMode) {
+            Box(Modifier.fillMaxSize().background(Color(0xFF284D38)), contentAlignment = Alignment.Center) {
+                BIcon("leaf", 92f, Color(0xFF91B481))
+            }
+        } else if (hasPermission) {
             AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
         }
+
         Box(
             Modifier.fillMaxSize().background(
                 cssGradient(
@@ -282,6 +291,14 @@ fun CaptureScreen(
                 )
             }
         }
+    }
+}
+
+@ComposePreview(showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun CaptureScreenPreview() {
+    MaterialTheme {
+        Surface { CaptureScreen({}, {}, previewMode = true) }
     }
 }
 

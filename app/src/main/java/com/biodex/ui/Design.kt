@@ -23,10 +23,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -40,31 +38,9 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 
-object BColor {
-    val Page = Color(0xFFF7F8F2)
-    val Outer = Color(0xFFEEF4E9)
-    val Ink = Color(0xFF173C2A)
-    val Forest = Color(0xFF285B3C)
-    val Orange = Color(0xFFE58C37)
-    val Orange2 = Color(0xFFD47C2B)
-    val Amber = Color(0xFFEAA552)
-    val Muted = Color(0xFF89978D)
-    val Muted2 = Color(0xFF6D7F72)
-    val Border = Color(0xFFE1E7DC)
-}
-
-@OptIn(androidx.compose.ui.text.ExperimentalTextApi::class)
-val Sans = FontFamily(
-    listOf(400, 500, 600, 700).map { w ->
-        Font(
-            R.font.dm_sans,
-            FontWeight(w),
-            variationSettings = FontVariation.Settings(FontVariation.weight(w)),
-        )
-    },
-)
-val Serif = FontFamily(Font(R.font.dm_serif_regular))
-val SerifItalic = FontFamily(Font(R.font.dm_serif_italic, style = FontStyle.Italic))
+val Sans: FontFamily = BioDexTheme.Typography.Sans
+val Serif: FontFamily = BioDexTheme.Typography.Serif
+val SerifItalic: FontFamily = BioDexTheme.Typography.SerifItalic
 
 /** Text sized in CSS px (1:1 with sp so that user font scale does not break the pixel-perfect layout). */
 @Composable
@@ -147,6 +123,13 @@ private val iconPaths: Map<String, List<String>> = mapOf(
         "M4.5 21c2.5-6.5 6-9.5 11-12",
     ),
     "search" to listOf(circle(10.5f, 10.5f, 6.5f), "m15.5 15.5 5 5"),
+    "share" to listOf(
+        circle(18f, 5f, 2.5f),
+        circle(6f, 12f, 2.5f),
+        circle(18f, 19f, 2.5f),
+        "m8.2 10.8 7.6-4.5",
+        "m8.2 13.2 7.6 4.5",
+    ),
     "spark" to listOf(
         "M12 2.5c.7 5.3 3.2 7.8 8.5 8.5-5.3.7-7.8 3.2-8.5 8.5-.7-5.3-3.2-7.8-8.5-8.5 5.3-.7 7.8-3.2 8.5-8.5Z",
         "M19 3v4M21 5h-4",
@@ -179,4 +162,3 @@ fun BIcon(name: String, size: Float, tint: Color, modifier: Modifier = Modifier,
         }
     }
 }
-

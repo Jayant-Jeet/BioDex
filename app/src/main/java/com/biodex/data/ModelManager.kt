@@ -1,236 +1,101 @@
 package com.biodex.data
 
-import android.app.DownloadManager
 import android.content.Context
-import android.database.Cursor
-import android.net.Uri
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import kotlinx.coroutines.delay
+import java.security.NoSuchAlgorithmException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 object ModelManager {
     const val MODEL_FILE_NAME = "bioclip_2_5_vith14_image_fp16.onnx"
-    // Raw download URL (must point directly to binary file, not GitHub HTML preview page)
-    const val DEFAULT_MODEL_URL = "https://github.com/Jayant-Jeet/BioDex/raw/main/releases/download/$MODEL_FILE_NAME"
-    const val EXPECTED_MODEL_SIZE_BYTES = 1_264_483_431L // Exact ONNX model size in bytes
+    const val DEFAULT_MODEL_URL =
+        "https://github.com/Jayant-Jeet/BioDex/raw/main/releases/download/$MODEL_FILE_NAME"
+    const val EXPECTED_MODEL_SIZE_BYTES = 1_264_483_431L
+    const val EXPECTED_MODEL_SHA256 =
+        "b97083f340e214810080a16f53ee89c2b2fdac556629babebbc84e141b42c194"
+
+    private const val VERIFICATION_PREFERENCES = "biodex_model_verification"
+    private const val KEY_SHA256 = "sha256"
+    private const val KEY_SIZE = "size"
+    private const val KEY_MODIFIED = "modified"
 
     fun getModelFile(context: Context): File {
         val modelDir = File(context.applicationContext.filesDir, "bioclip")
-        if (!modelDir.exists()) {
-            modelDir.mkdirs()
+        if (!modelDir.exists() && !modelDir.mkdirs()) {
+            throw IllegalStateException("Could not create the BioCLIP model directory.")
         }
         return File(modelDir, MODEL_FILE_NAME)
     }
 
-    fun isModelDownloaded(context: Context): Boolean {
-        // First check if full model is bundled in APK assets (e.g. local debug build)
+    fun getPartialModelFile(context: Context): File =
+        File(getModelFile(context).parentFile, "$MODEL_FILE_NAME.part")
+
+    suspend fun hasVerifiedModel(context: Context): Boolean = withContext(Dispatchers.IO) {
         try {
             context.assets.openFd("bioclip/$MODEL_FILE_NAME").use { asset ->
-                if (asset.length == EXPECTED_MODEL_SIZE_BYTES) return true
+                if (asset.length == EXPECTED_MODEL_SIZE_BYTES) return@withContext true
             }
-        } catch (_: Exception) {}
+        } catch (_: java.io.FileNotFoundException) {
+            // The model is downloaded on demand in release builds.
+        }
 
-        // Check if full model exists in local downloaded storage
         val modelFile = getModelFile(context)
-        if (modelFile.exists() && modelFile.isFile) {
-            if (modelFile.length() == EXPECTED_MODEL_SIZE_BYTES) {
-                return true
-            } else {
-                // Delete invalid or truncated file
-                modelFile.delete()
+        if (!modelFile.isFile || modelFile.length() != EXPECTED_MODEL_SIZE_BYTES) {
+            if (modelFile.exists() && !modelFile.delete()) {
+                android.util.Log.w("BioDexModel", "Could not remove a model file with an invalid size.")
             }
+            clearVerificationMarker(context)
+            return@withContext false
         }
-        return false
+
+        val preferences = context.applicationContext.getSharedPreferences(
+            VERIFICATION_PREFERENCES,
+            Context.MODE_PRIVATE,
+        )
+        val verifiedMarkerMatches =
+            preferences.getString(KEY_SHA256, null) == EXPECTED_MODEL_SHA256 &&
+                preferences.getLong(KEY_SIZE, -1L) == modelFile.length() &&
+                preferences.getLong(KEY_MODIFIED, -1L) == modelFile.lastModified()
+        if (verifiedMarkerMatches) return@withContext true
+
+        val actualSha256 = try {
+            ResumableModelDownloader.sha256(modelFile)
+        } catch (exception: IOException) {
+            android.util.Log.e("BioDexModel", "Could not verify the downloaded model.", exception)
+            return@withContext false
+        } catch (exception: NoSuchAlgorithmException) {
+            throw IllegalStateException("SHA-256 is unavailable on this device.", exception)
+        }
+        if (!actualSha256.equals(EXPECTED_MODEL_SHA256, ignoreCase = true)) {
+            android.util.Log.e("BioDexModel", "The saved model failed SHA-256 validation and will be downloaded again.")
+            if (!modelFile.delete()) android.util.Log.w("BioDexModel", "Could not remove the invalid model file.")
+            clearVerificationMarker(context)
+            return@withContext false
+        }
+        markVerified(context, modelFile)
+        true
     }
 
-    @Throws(IOException::class)
-    suspend fun downloadModel(
-        context: Context,
-        modelUrl: String = DEFAULT_MODEL_URL,
-        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
-    ) {
-        val appContext = context.applicationContext
-        val downloadManager = appContext.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-
-        if (downloadManager != null) {
-            try {
-                downloadWithDownloadManager(appContext, downloadManager, modelUrl, onProgress)
-                return
-            } catch (_: Exception) {
-                // Fallback to HttpURLConnection if DownloadManager fails
-            }
+    fun markVerified(context: Context, modelFile: File = getModelFile(context)) {
+        check(modelFile.isFile && modelFile.length() == EXPECTED_MODEL_SIZE_BYTES) {
+            "Cannot mark a model verified when its size is invalid."
         }
-
-        downloadWithHttpURLConnection(appContext, modelUrl, onProgress)
+        val saved = context.applicationContext.getSharedPreferences(
+            VERIFICATION_PREFERENCES,
+            Context.MODE_PRIVATE,
+        ).edit()
+            .putString(KEY_SHA256, EXPECTED_MODEL_SHA256)
+            .putLong(KEY_SIZE, modelFile.length())
+            .putLong(KEY_MODIFIED, modelFile.lastModified())
+            .commit()
+        check(saved) { "Could not persist the verified model marker." }
     }
 
-    private suspend fun downloadWithDownloadManager(
-        context: Context,
-        downloadManager: DownloadManager,
-        modelUrl: String,
-        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
-    ) {
-        val finalModelFile = getModelFile(context)
-        val tempFileName = "$MODEL_FILE_NAME.tmp"
-
-        val destDir = context.getExternalFilesDir(null) ?: context.filesDir
-        val downloadedTempFile = File(destDir, tempFileName)
-        if (downloadedTempFile.exists()) {
-            downloadedTempFile.delete()
-        }
-
-        val request = DownloadManager.Request(Uri.parse(modelUrl))
-            .setTitle("BioCLIP Field Guide Model")
-            .setDescription("Downloading AI model for offline identification")
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true)
-            .setDestinationInExternalFilesDir(context, null, tempFileName)
-
-        val downloadId = downloadManager.enqueue(request)
-
-        while (true) {
-            val query = DownloadManager.Query().setFilterById(downloadId)
-            val cursor: Cursor? = downloadManager.query(query)
-            if (cursor != null && cursor.moveToFirst()) {
-                val bytesDownloadedIndex = cursor.getColumnIndex(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                val totalSizeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                val statusIndex = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS)
-                val reasonIndex = cursor.getColumnIndex(DownloadManager.COLUMN_REASON)
-
-                val downloadedBytes = if (bytesDownloadedIndex >= 0) cursor.getLong(bytesDownloadedIndex) else 0L
-                val totalBytes = if (totalSizeIndex >= 0) {
-                    val size = cursor.getLong(totalSizeIndex)
-                    if (size > 0) size else EXPECTED_MODEL_SIZE_BYTES
-                } else EXPECTED_MODEL_SIZE_BYTES
-
-                if (downloadedBytes > 0) {
-                    onProgress(downloadedBytes, totalBytes)
-                }
-
-                if (statusIndex >= 0) {
-                    when (cursor.getInt(statusIndex)) {
-                        DownloadManager.STATUS_SUCCESSFUL -> {
-                            cursor.close()
-                            break
-                        }
-                        DownloadManager.STATUS_FAILED -> {
-                            val reason = if (reasonIndex >= 0) cursor.getInt(reasonIndex) else -1
-                            cursor.close()
-                            throw IOException("System DownloadManager failed with error code $reason.")
-                        }
-                    }
-                }
-                cursor.close()
-            }
-            delay(300)
-        }
-
-        if (downloadedTempFile.exists()) {
-            if (finalModelFile.exists()) {
-                finalModelFile.delete()
-            }
-            BufferedInputStream(downloadedTempFile.inputStream()).use { input ->
-                BufferedOutputStream(FileOutputStream(finalModelFile)).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            downloadedTempFile.delete()
-        }
-
-        if (finalModelFile.length() != EXPECTED_MODEL_SIZE_BYTES) {
-            finalModelFile.delete()
-            throw IOException("Downloaded model file size (${finalModelFile.length()} bytes) does not match expected size ($EXPECTED_MODEL_SIZE_BYTES bytes).")
-        }
-    }
-
-    private fun downloadWithHttpURLConnection(
-        context: Context,
-        modelUrl: String,
-        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit
-    ) {
-        val modelFile = getModelFile(context)
-        val tempFile = File(modelFile.parentFile, "$MODEL_FILE_NAME.tmp")
-
-        var currentUrl = modelUrl
-        var connection: HttpURLConnection? = null
-        var redirectCount = 0
-
-        try {
-            while (redirectCount < 10) {
-                val url = URL(currentUrl)
-                connection = url.openConnection() as HttpURLConnection
-                connection.connectTimeout = 20_000
-                connection.readTimeout = 30_000
-                connection.instanceFollowRedirects = true
-
-                val status = connection.responseCode
-                if (status == HttpURLConnection.HTTP_MOVED_TEMP ||
-                    status == HttpURLConnection.HTTP_MOVED_PERM ||
-                    status == HttpURLConnection.HTTP_SEE_OTHER ||
-                    status == 307 || status == 308
-                ) {
-                    val location = connection.getHeaderField("Location")
-                        ?: throw IOException("HTTP redirect missing Location header.")
-                    currentUrl = location
-                    connection.disconnect()
-                    redirectCount++
-                    continue
-                }
-
-                if (status !in 200..299) {
-                    throw IOException("Server returned HTTP response code $status: ${connection.responseMessage}")
-                }
-                break
-            }
-
-            val conn = connection ?: throw IOException("Could not establish connection to model URL.")
-            val contentLength = conn.contentLengthLong.let {
-                if (it > 0) it else EXPECTED_MODEL_SIZE_BYTES
-            }
-
-            BufferedInputStream(conn.inputStream, 64 * 1024).use { input ->
-                BufferedOutputStream(FileOutputStream(tempFile), 64 * 1024).use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    var downloadedBytes = 0L
-                    var bytesRead: Int
-                    var lastReportedTime = System.currentTimeMillis()
-
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastReportedTime >= 100 || downloadedBytes == contentLength) {
-                            lastReportedTime = currentTime
-                            onProgress(downloadedBytes, contentLength)
-                        }
-                    }
-                    output.flush()
-                }
-            }
-
-            if (tempFile.length() != EXPECTED_MODEL_SIZE_BYTES && tempFile.length() != contentLength) {
-                throw IOException("Downloaded file size (${tempFile.length()} bytes) does not match expected size ($EXPECTED_MODEL_SIZE_BYTES bytes).")
-            }
-
-            if (modelFile.exists()) {
-                modelFile.delete()
-            }
-
-            if (!tempFile.renameTo(modelFile)) {
-                throw IOException("Could not save the downloaded model file to destination.")
-            }
-        } finally {
-            connection?.disconnect()
-            if (tempFile.exists()) {
-                tempFile.delete()
-            }
-        }
+    private fun clearVerificationMarker(context: Context) {
+        context.applicationContext.getSharedPreferences(
+            VERIFICATION_PREFERENCES,
+            Context.MODE_PRIVATE,
+        ).edit().clear().apply()
     }
 }
